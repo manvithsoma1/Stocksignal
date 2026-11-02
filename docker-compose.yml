@@ -1,0 +1,27 @@
+services:
+  db:
+    image: postgres:16
+    container_name: stocksignal-db
+    environment:
+      POSTGRES_DB: stocksignal
+      POSTGRES_USER: stocksignal
+      POSTGRES_PASSWORD: stocksignal_dev
+    ports: ["5432:5432"]
+    volumes: [stocksignal_pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stocksignal -d stocksignal"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+  backend:
+    build: ./backend
+    container_name: stocksignal-api
+    env_file: .env
+    ports: ["8000:8000"]
+    depends_on:
+      db:
+        condition: service_healthy
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    volumes: ["./backend:/app"]
+volumes:
+  stocksignal_pgdata:
