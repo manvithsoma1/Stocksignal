@@ -4,8 +4,9 @@ Pydantic request and response schemas for the inventory ledger API.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal
+from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -61,19 +62,14 @@ class MovementCreate(BaseModel):
     postings: list[PostingSpec] = Field(..., min_length=1)
 
     @model_validator(mode="after")
-    def validate_quantity_and_postings(self) -> "MovementCreate":  # noqa: D401
+    def validate_quantity_and_postings(self) -> "MovementCreate":
         mt = self.movement_type
 
         if mt == MovementType.RECLASSIFY:
-            # --- RECLASSIFY rules (mirror the DB trigger) ---
             if self.quantity_delta != 0:
-                raise ValueError(
-                    "RECLASSIFY movement must have quantity_delta = 0"
-                )
+                raise ValueError("RECLASSIFY movement must have quantity_delta = 0")
             if len(self.postings) != 2:
-                raise ValueError(
-                    "RECLASSIFY movement must have exactly 2 postings"
-                )
+                raise ValueError("RECLASSIFY movement must have exactly 2 postings")
             buckets = {p.bucket_type for p in self.postings}
             if buckets != {BucketType.SELLABLE, BucketType.QUARANTINED}:
                 raise ValueError(
@@ -93,7 +89,6 @@ class MovementCreate(BaseModel):
                     "(equal absolute quantities, opposite signs)"
                 )
         else:
-            # --- Standard rules ---
             posting_sum = sum(p.quantity_delta for p in self.postings)
             if posting_sum != self.quantity_delta:
                 raise ValueError(
@@ -109,8 +104,52 @@ class ReversalCreate(BaseModel):
 
     idempotency_key: str = Field(..., max_length=128)
     source_system: str = Field(..., max_length=80)
-    occurred_at: datetime
+    occurred_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     notes: str | None = None
+
+
+class ReclassifyCreate(BaseModel):
+    """Payload for reclassifying stock between SELLABLE and QUARANTINED."""
+
+    organization_id: uuid.UUID
+    store_id: uuid.UUID
+    product_id: uuid.UUID
+    batch_id: uuid.UUID | None = None
+    from_bucket: BucketType = BucketType.SELLABLE
+    to_bucket: BucketType = BucketType.QUARANTINED
+    quantity: Decimal = Field(..., gt=0, description="Positive quantity to transfer between buckets")
+    idempotency_key: str = Field(..., max_length=128)
+    source_system: str = Field(..., max_length=80)
+    occurred_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    notes: str | None = None
+
+    @model_validator(mode="after")
+    def validate_buckets(self) -> "ReclassifyCreate":
+        valid_pair = {self.from_bucket, self.to_bucket} == {BucketType.SELLABLE, BucketType.QUARANTINED}
+        if not valid_pair:
+            raise ValueError("Reclassification is only supported between SELLABLE and QUARANTINED buckets")
+        return self
+
+
+class TransferCreate(BaseModel):
+    """Payload for transferring stock between stores within an organization."""
+
+    organization_id: uuid.UUID
+    from_store_id: uuid.UUID
+    to_store_id: uuid.UUID
+    product_id: uuid.UUID
+    batch_id: uuid.UUID | None = None
+    quantity: Decimal = Field(..., gt=0, description="Quantity to transfer")
+    idempotency_key: str = Field(..., max_length=128)
+    source_system: str = Field(..., max_length=80)
+    occurred_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    notes: str | None = None
+
+    @model_validator(mode="after")
+    def validate_stores(self) -> "TransferCreate":
+        if self.from_store_id == self.to_store_id:
+            raise ValueError("Source store and destination store must be different")
+        return self
 
 
 # --------------------------------------------------------------------------- #
@@ -154,7 +193,22 @@ class StockBalanceResponse(BaseModel):
     organization_id: uuid.UUID
     store_id: uuid.UUID
     product_id: uuid.UUID
-    sellable: Decimal
-    quarantined: Decimal
-    physical: Decimal
+    sellable: Decimal = Decimal("0.000")
+    quarantined: Decimal = Decimal("0.000")
+    physical: Decimal = Decimal("0.000")
 
+
+class BatchBalanceItem(BaseModel):
+    batch_id: uuid.UUID
+    batch_code: str | None = None
+    expiry_date: date | None = None
+    sellable: Decimal = Decimal("0.000")
+    quarantined: Decimal = Decimal("0.000")
+    total: Decimal = Decimal("0.000")
+
+
+class BatchBalancesResponse(BaseModel):
+    organization_id: uuid.UUID
+    store_id: uuid.UUID
+    product_id: uuid.UUID
+    batches: list[BatchBalanceItem] = []

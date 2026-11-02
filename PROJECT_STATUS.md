@@ -12,8 +12,8 @@ This document tracks implementation status, architectural components, test cover
 | Phase | Component / Capability | Status | Tests | Notes / Blockers |
 |---|---|---|---|---|
 | **Phase 0** | **Audit & Preparation** | **Completed** | N/A | Starter code verified; Git repo initialized; `.gitignore` configured; `PROJECT_STATUS.md` established. |
-| **Phase 1** | **Database & Docker Foundation** | **In Progress** | 2/2 passed (seed) | Docker Compose (`stocksignal-api`, `stocksignal-db`), PG 16 healthy. Alembic `0001_core` applied. Migration `0002_inventory_ledger_rules` drafted and verified for safety. |
-| **Phase 2** | **Inventory Ledger Service & API** | **In Progress** | Planned | Schemas completed; model `core.py` updated with `reversed_movement_id` and composite FK; ledger service and API endpoints being implemented. |
+| **Phase 1** | **Database & Docker Foundation** | **Completed** | 17/17 passed | Docker Compose (`stocksignal-api`, `stocksignal-db`), PG 16 healthy. Alembic `0001_core` and `0002_inventory_ledger_rules` applied. 15 migration integration tests passing on isolated DB. |
+| **Phase 2** | **Inventory Ledger Service & API** | **Completed** | 10/10 passed | Immutable ledger movements, reversals, reclassifications, store-to-store transfers, bucket balances, FastAPI router registered at `/api/v1/inventory`. |
 | **Phase 3** | **Deterministic Evaluation Scenarios** | **Planned** | Planned | 5 core synthetic test scenarios: correct stock, unrecorded damage, duplicate scan, receipt discrepancy, return misclassification. |
 | **Phase 4** | **Synthetic Data Generator** | **Planned** | Planned | Realistic generator with operational vs. ground-truth separation (3-5 stores, 300+ SKUs, batch expiry, injected discrepancies). |
 | **Phase 5** | **Public Data Pipeline** | **Planned** | Planned | M5 Walmart forecasting benchmark ingestion & Favorita grocery adapter, stored in Parquet with chronological validation. |
@@ -58,3 +58,4 @@ This document tracks implementation status, architectural components, test cover
 - **Database**: PostgreSQL 16 with UUID primary keys, Decimal numeric precision (no floating-point rounding errors for money or inventory quantities), deferred constraint triggers.
 - **Architecture**: Modular Monolith. Strictly zero unneeded distributed infrastructure (no Kafka, no microservice orchestration).
 - **Testing Safety**: Integration tests execute strictly against isolated `TEST_DATABASE_URL` (`stocksignal_test`), preserving development and production ledger integrity.
+

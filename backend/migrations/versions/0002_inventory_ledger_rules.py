@@ -16,6 +16,7 @@ depends_on = None
 
 def upgrade() -> None:
     conn = op.get_bind()
+    inspector = sa.inspect(conn)
 
     # ------------------------------------------------------------------ #
     # 1. Add RECLASSIFY to the movement_type PostgreSQL ENUM.             #
@@ -26,41 +27,47 @@ def upgrade() -> None:
     ))
 
     # ------------------------------------------------------------------ #
-    # 2. Add reversed_movement_id column.                                #
+    # 2. Add reversed_movement_id column if not already present.         #
     # ------------------------------------------------------------------ #
-    op.add_column(
-        "inventory_movements",
-        sa.Column(
-            "reversed_movement_id",
-            UUID(as_uuid=True),
-            nullable=True,
-        ),
-    )
+    existing_cols = [c["name"] for c in inspector.get_columns("inventory_movements")]
+    if "reversed_movement_id" not in existing_cols:
+        op.add_column(
+            "inventory_movements",
+            sa.Column(
+                "reversed_movement_id",
+                UUID(as_uuid=True),
+                nullable=True,
+            ),
+        )
 
     # ------------------------------------------------------------------ #
     # 3. Tenant-safe composite foreign key self-referencing movements:   #
     #    (organization_id, reversed_movement_id) -> (organization_id, id)#
     #    utilizing the existing unique constraint uq_movements_org_id.   #
     # ------------------------------------------------------------------ #
-    op.create_foreign_key(
-        "fk_movements_reversal_source",
-        "inventory_movements",
-        "inventory_movements",
-        ["organization_id", "reversed_movement_id"],
-        ["organization_id", "id"],
-    )
+    existing_fks = [fk["name"] for fk in inspector.get_foreign_keys("inventory_movements")]
+    if "fk_movements_reversal_source" not in existing_fks:
+        op.create_foreign_key(
+            "fk_movements_reversal_source",
+            "inventory_movements",
+            "inventory_movements",
+            ["organization_id", "reversed_movement_id"],
+            ["organization_id", "id"],
+        )
 
     # ------------------------------------------------------------------ #
     # 4. Partial unique index: each movement can be reversed at most once.#
     #    Applies only when reversed_movement_id IS NOT NULL.             #
     # ------------------------------------------------------------------ #
-    op.create_index(
-        "uq_movements_reversed_once",
-        "inventory_movements",
-        ["reversed_movement_id"],
-        unique=True,
-        postgresql_where=sa.text("reversed_movement_id IS NOT NULL"),
-    )
+    existing_indexes = [idx["name"] for idx in inspector.get_indexes("inventory_movements")]
+    if "uq_movements_reversed_once" not in existing_indexes:
+        op.create_index(
+            "uq_movements_reversed_once",
+            "inventory_movements",
+            ["reversed_movement_id"],
+            unique=True,
+            postgresql_where=sa.text("reversed_movement_id IS NOT NULL"),
+        )
 
     # ------------------------------------------------------------------ #
     # 5. Delta rules check constraint:                                   #
@@ -69,14 +76,17 @@ def upgrade() -> None:
     #      reclassification)                                            #
     #    - All other movement types require quantity_delta <> 0          #
     # ------------------------------------------------------------------ #
-    op.drop_constraint("ck_movement_nonzero_delta", "inventory_movements", type_="check")
-    op.create_check_constraint(
-        "ck_movement_delta_rules",
-        "inventory_movements",
-        "(movement_type::text = 'RECLASSIFY' AND quantity_delta = 0)"
-        " OR (movement_type::text = 'REVERSAL')"
-        " OR (movement_type::text NOT IN ('RECLASSIFY', 'REVERSAL') AND quantity_delta <> 0)",
-    )
+    existing_cks = [ck["name"] for ck in inspector.get_check_constraints("inventory_movements")]
+    if "ck_movement_nonzero_delta" in existing_cks:
+        op.drop_constraint("ck_movement_nonzero_delta", "inventory_movements", type_="check")
+    if "ck_movement_delta_rules" not in existing_cks:
+        op.create_check_constraint(
+            "ck_movement_delta_rules",
+            "inventory_movements",
+            "(movement_type::text = 'RECLASSIFY' AND quantity_delta = 0)"
+            " OR (movement_type::text = 'REVERSAL')"
+            " OR (movement_type::text NOT IN ('RECLASSIFY', 'REVERSAL') AND quantity_delta <> 0)",
+        )
 
     # ------------------------------------------------------------------ #
     # 6. Reversal reference integrity check constraint:                  #
@@ -84,12 +94,13 @@ def upgrade() -> None:
     #    - If movement_type != 'REVERSAL', reversed_movement_id IS NULL  #
     #    - Cannot reference self (reversed_movement_id <> id)            #
     # ------------------------------------------------------------------ #
-    op.create_check_constraint(
-        "ck_movement_reversal_reference",
-        "inventory_movements",
-        "(movement_type::text = 'REVERSAL' AND reversed_movement_id IS NOT NULL AND reversed_movement_id <> id)"
-        " OR (movement_type::text <> 'REVERSAL' AND reversed_movement_id IS NULL)",
-    )
+    if "ck_movement_reversal_reference" not in existing_cks:
+        op.create_check_constraint(
+            "ck_movement_reversal_reference",
+            "inventory_movements",
+            "(movement_type::text = 'REVERSAL' AND reversed_movement_id IS NOT NULL AND reversed_movement_id <> id)"
+            " OR (movement_type::text <> 'REVERSAL' AND reversed_movement_id IS NULL)",
+        )
 
     # ------------------------------------------------------------------ #
     # 7. Update trigger function with RECLASSIFY structural verification:#
