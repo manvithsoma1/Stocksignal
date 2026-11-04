@@ -525,3 +525,4 @@ def run_all_scenarios(
         scenario_receipt_discrepancy(db, org_id, store_id, product_ids["RECEIPT_DISCREPANCY"]),
         scenario_return_misclassify(db, org_id, store_id, product_ids["RETURN_MISCLASSIFY"]),
     ]
+

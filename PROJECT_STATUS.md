@@ -11,19 +11,83 @@ This document tracks implementation status, architectural components, test cover
 
 | Phase | Component / Capability | Status | Tests | Notes / Blockers |
 |---|---|---|---|---|
-| **Phase 0** | **Audit & Preparation** | **Completed** | N/A | Starter code verified; Git repo initialized; `.gitignore` configured; `PROJECT_STATUS.md` established. |
-| **Phase 1** | **Database & Docker Foundation** | **Completed** | 17/17 passed | Docker Compose (`stocksignal-api`, `stocksignal-db`), PG 16 healthy. Alembic `0001_core` and `0002_inventory_ledger_rules` applied. 15 migration integration tests passing on isolated DB. |
-| **Phase 2** | **Inventory Ledger Service & API** | **Completed** | 10/10 passed | Immutable ledger movements, reversals, reclassifications, store-to-store transfers, bucket balances, FastAPI router registered at `/api/v1/inventory`. |
-| **Phase 3** | **Deterministic Evaluation Scenarios** | **Planned** | Planned | 5 core synthetic test scenarios: correct stock, unrecorded damage, duplicate scan, receipt discrepancy, return misclassification. |
-| **Phase 4** | **Synthetic Data Generator** | **Planned** | Planned | Realistic generator with operational vs. ground-truth separation (3-5 stores, 300+ SKUs, batch expiry, injected discrepancies). |
-| **Phase 5** | **Public Data Pipeline** | **Planned** | Planned | M5 Walmart forecasting benchmark ingestion & Favorita grocery adapter, stored in Parquet with chronological validation. |
-| **Phase 6** | **Inventory Discrepancy & Reconciliation Engine** | **Planned** | Planned | Ledger vs. physical count reconciliation, anomaly detection heuristics, discrepancy classification, physical count workflow. |
-| **Phase 7** | **Perishable Inventory Risk Module** | **Planned** | Planned | Batch expiry tracking, shelf-life risk calculation, FIFO/FEFO allocation comparison, markdown triggers. |
-| **Phase 8** | **Action Recommendation Engine** | **Planned** | Planned | Rules-first decision engine: `PHYSICAL_COUNT`, `REPLENISH`, `MARKDOWN_REVIEW`, `TRANSFER_REVIEW`, `MONITOR`, `NO_ACTION`. |
-| **Phase 9** | **Outcome Tracking & Audit Trail** | **Planned** | Planned | Action state machine (`PENDING` -> `APPROVED` -> `IN_PROGRESS` -> `COMPLETED` -> `VERIFIED`), feedback capture, ledger links. |
-| **Phase 10** | **Dashboard / User Interface** | **Planned** | Planned | Clean, production-ready frontend for supermarket managers and inventory controllers. |
-| **Phase 11** | **End-to-End Verification & QA** | **Planned** | Planned | Full test suite across ledger, data pipelines, reconciliation, decision engine, and API. |
-| **Phase 12** | **GitHub Delivery & Packaging** | **Planned** | Planned | Clean commits, verified remote push to `https://github.com/manvithsoma1/Stocksignal.git`, demo instructions. |
+| **Phase 0** | **Audit & Preparation** | **Completed** | N/A | Codebase audited; Git repo verified; Docker healthy; all dependencies installed. |
+| **Phase 1** | **Database & Docker Foundation** | **Completed** | 17/17 passed | Docker Compose (`stocksignal-api`, `stocksignal-db`), PG 16 healthy. Alembic `0001_core` and `0002_inventory_ledger_rules` applied. 17 migration integration tests passing on isolated DB. |
+| **Phase 2** | **Inventory Ledger Service & API** | **Completed** | 10/10 passed | Immutable ledger movements, reversals, reclassifications, store-to-store transfers, bucket balances, FastAPI router at `/api/v1/inventory`. |
+| **Phase 3** | **Deterministic Evaluation Scenarios** | **Completed** | 6/6 passed | 5 core scenarios implemented: correct stock, unrecorded damage, duplicate scan, receipt discrepancy, return misclassification. |
+| **Phase 4** | **Synthetic Data Generator** | **Completed** | 6/6 passed | Full generator with operational vs. ground-truth separation (configurable stores/SKUs/days, 5 discrepancy types). |
+| **Phase 5** | **Inventory Reconciliation Engine** | **Completed** | 10/10 passed | Ledger vs. physical count reconciliation, severity scoring (OK/LOW/MEDIUM/HIGH/CRITICAL), discrepancy classification (SHRINK/PHANTOM/MISCLASSIFICATION), physical count workflow (OPEN→COUNTED→REVIEWED→COMMITTED). |
+| **Phase 6** | **Public Data Pipeline** | **Pending** | 0 | M5 Walmart forecasting benchmark ingestion & Favorita grocery adapter, stored in Parquet with chronological validation. |
+| **Phase 7** | **Perishable Inventory Risk Module** | **Pending** | 0 | Batch expiry tracking, shelf-life risk calculation, FIFO/FEFO allocation comparison, markdown triggers. |
+| **Phase 8** | **Action Recommendation Engine** | **Pending** | 0 | Rules-first decision engine: `PHYSICAL_COUNT`, `REPLENISH`, `MARKDOWN_REVIEW`, `TRANSFER_REVIEW`, `MONITOR`, `NO_ACTION`. |
+| **Phase 9** | **Outcome Tracking & Audit Trail** | **Pending** | 0 | Action state machine (`PENDING` -> `APPROVED` -> `IN_PROGRESS` -> `COMPLETED` -> `VERIFIED`), feedback capture, ledger links. |
+| **Phase 10** | **Dashboard / User Interface** | **Pending** | 0 | Clean, production-ready frontend for supermarket managers and inventory controllers. |
+| **Phase 11** | **End-to-End Verification & QA** | **In Progress** | 49/49 passed | Full test suite across ledger, scenarios, synthetic generator, reconciliation, migration, and API. |
+| **Phase 12** | **GitHub Delivery & Packaging** | **Pending** | 0 | Clean commits, verified remote push to `https://github.com/manvithsoma1/Stocksignal.git`, demo instructions. |
+
+---
+
+## Phase 0 Audit Summary
+
+### Existing Implementation Found
+
+**Infrastructure:**
+- Docker Compose with PostgreSQL 16 and FastAPI backend
+- Alembic migrations: 0001_core, 0002_inventory_ledger_rules
+- Database: stocksignal (development), stocksignal_test (isolated test database)
+- Git remote: https://github.com/manvithsoma1/Stocksignal.git
+- Current branch: master
+- Latest commit: bb058b8 "feat: Phase 3+4 complete — 5 deterministic scenarios, synthetic data generator, 39 tests passing"
+
+**Components Preserved:**
+- Database models: Organization, Store, Product, StoreProduct, Batch, InventoryMovement, InventoryMovementPosting
+- Movement types: 14 types including RECLASSIFY and REVERSAL
+- Bucket types: SELLABLE, QUARANTINED
+- Ledger service: record_movement, record_reversal, record_reclassify, record_transfer, balance queries
+- API router: /api/v1/inventory with endpoints for movements, reversals, reclassify, transfers, balance, batches, history
+- Seed data: 1 organization, 2 stores, 24 products, 48 store-product mappings
+- Deterministic scenarios: 5 discrepancy injection scenarios
+- Synthetic data generator: Configurable stores/SKUs/days with ground-truth separation
+- Reconciliation engine: Severity scoring, discrepancy classification, physical count workflow
+
+**Components Completed During This Session:**
+- Fixed test_reconciliation.py: Removed duplicate movement creation that violated ledger constraints
+- Verified all 49 tests passing (1 health, 10 ledger, 17 migration 0002, 10 reconciliation, 6 scenarios, 6 synthetic, 1 seed)
+- Updated PROJECT_STATUS.md with accurate status
+
+**Test Results:**
+- 49/49 tests passing
+- test_health.py: 1 passed
+- test_ledger.py: 10 passed
+- test_migration_0002.py: 17 passed
+- test_reconciliation.py: 10 passed
+- test_scenarios.py: 6 passed
+- test_synthetic.py: 6 passed
+- test_seed.py: 1 passed
+
+**Database Schema:**
+- Migration 0001: Core tables with deferred trigger for posting validation
+- Migration 0002: RECLASSIFY support, reversal foreign key, partial unique index, downgrade guard
+- All constraints enforced: posting totals, reversal uniqueness, delta rules, reference integrity
+
+**Known Bugs:**
+- None currently identified
+
+**Known Limitations:**
+- No frontend implemented
+- No public dataset integration (M5, Favorita)
+- No perishable expiry risk module
+- No recommendation engine
+- No action tracking tables
+- No forecasting module
+
+**Next Steps:**
+- Phase 6: Public Data Pipeline (M5 dataset ingestion)
+- Phase 7: Perishable Inventory Risk Module
+- Phase 8: Action Recommendation Engine
+- Phase 9: Outcome Tracking & Audit Trail
+- Phase 10: Dashboard / User Interface
+- Phase 12: GitHub Delivery & Packaging
 
 ---
 

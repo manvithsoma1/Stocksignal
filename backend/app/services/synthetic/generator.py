@@ -393,3 +393,4 @@ class SyntheticGenerator:
             }
 
         return summary
+

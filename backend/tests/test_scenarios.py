@@ -263,3 +263,4 @@ def test_run_all_scenarios_produces_five_results(db_session: Session, scenario_c
     discrepancies_found = [r for r in results if r.discrepancy.has_discrepancy]
     # UNRECORDED_DAMAGE and RETURN_MISCLASSIFY should flag discrepancies
     assert len(discrepancies_found) == 2
+

@@ -235,3 +235,4 @@ def test_generator_is_deterministic_with_fixed_seed(db_session: Session, synth_c
 
     assert summary1["total_ground_truth_events"] == summary2["total_ground_truth_events"]
     assert summary1["total_discrepancies_injected"] == summary2["total_discrepancies_injected"]
+
