@@ -1,3 +1,4 @@
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -16,6 +17,20 @@ class Settings(BaseSettings):
     auth_header_name: str = "X-Organization-ID"
 
     model_config = SettingsConfigDict(env_file=(".env", "../.env"), extra="ignore")
+
+    @field_validator("database_url", mode="after")
+    @classmethod
+    def normalize_database_url(cls, v: str) -> str:
+        """
+        Render and various cloud providers supply DATABASE_URL starting with
+        postgres:// or postgresql:// without the driver specification.
+        Normalize to postgresql+psycopg:// so SQLAlchemy uses psycopg (v3).
+        """
+        if v.startswith("postgres://"):
+            v = "postgresql+psycopg://" + v[len("postgres://"):]
+        elif v.startswith("postgresql://") and not v.startswith("postgresql+psycopg://"):
+            v = "postgresql+psycopg://" + v[len("postgresql://"):]
+        return v
 
 
 settings = Settings()
