@@ -636,10 +636,10 @@ def test_api_movement_and_balance_endpoints(db_session: Session, ledger_context:
         assert Decimal(bal_data2["sellable"]) == Decimal("40.000")
         assert Decimal(bal_data2["quarantined"]) == Decimal("10.000")
 
-        # 4. POST /api/v1/inventory/movements/{id}/reverse
+        # 4. POST /api/v1/inventory/movements/{id}/reverse (with allow_negative_stock=true since 10 was reclassified)
         res_rev = client.post(
             f"/api/v1/inventory/movements/{mv_id}/reverse",
-            params={"organization_id": str(ctx["org_id"])},
+            params={"organization_id": str(ctx["org_id"]), "allow_negative_stock": "true"},
             json={
                 "idempotency_key": str(uuid.uuid4()),
                 "source_system": "API_TEST",

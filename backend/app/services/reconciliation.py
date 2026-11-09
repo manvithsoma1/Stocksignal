@@ -52,11 +52,15 @@ class AnomalySeverity(str, Enum):
 
 class DiscrepancyClass(str, Enum):
     NONE = "NONE"
-    SHRINK = "SHRINK"               # Ledger > physical (unrecorded losses)
-    PHANTOM = "PHANTOM"             # Ledger < physical (unrecorded gains / ghost stock)
-    MISCLASSIFICATION = "MISCLASSIFICATION"  # Wrong bucket, correct total
-    SUPPLIER_SHORT = "SUPPLIER_SHORT"   # Supplier under-delivered
-    SYSTEM_ERROR = "SYSTEM_ERROR"       # Unexplained data error
+    SHRINKAGE = "SHRINKAGE"                       # Physical < Ledger (unrecorded losses, theft, spoilage)
+    GHOST_STOCK_PHANTOM = "GHOST_STOCK_PHANTOM"   # Physical > Ledger (unrecorded receipts, ghost stock / surplus)
+    MISCLASSIFICATION = "MISCLASSIFICATION"        # Net total matches, but bucket distribution differs
+    SUPPLIER_SHORT = "SUPPLIER_SHORT"             # Supplier under-delivered against invoice
+    SYSTEM_ERROR = "SYSTEM_ERROR"                 # Unexplained data invariant error
+
+    # Aliases for backwards-compatibility
+    SHRINK = "SHRINKAGE"
+    PHANTOM = "GHOST_STOCK_PHANTOM"
 
 
 class SuggestedAction(str, Enum):
@@ -186,13 +190,13 @@ def _classify_discrepancy(
     if total_gap == Decimal("0.000") and bucket_gaps:
         return DiscrepancyClass.MISCLASSIFICATION
 
-    # Net negative gap (ledger shows more than physical) → shrinkage
+    # Net negative gap (physical < ledger: missing on shelf) -> Shrinkage / pilferage
     if total_gap < Decimal("0.000"):
-        return DiscrepancyClass.SHRINK
+        return DiscrepancyClass.SHRINKAGE
 
-    # Net positive gap (physical shows more than ledger) → phantom stock
+    # Net positive gap (physical > ledger: surplus on shelf) -> Ghost stock / unrecorded receipts
     if total_gap > Decimal("0.000"):
-        return DiscrepancyClass.PHANTOM
+        return DiscrepancyClass.GHOST_STOCK_PHANTOM
 
     return DiscrepancyClass.SYSTEM_ERROR
 

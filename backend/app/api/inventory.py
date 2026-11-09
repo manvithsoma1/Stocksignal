@@ -68,10 +68,11 @@ def record_reversal(
     movement_id: uuid.UUID,
     payload: ReversalCreate,
     organization_id: uuid.UUID = Query(..., description="Organization ID"),
+    allow_negative_stock: bool = Query(False, description="Allow reversal to drive balance negative"),
     db: Session = Depends(get_db),
 ):
     try:
-        reversal = ledger.record_reversal(db, movement_id, payload, organization_id)
+        reversal = ledger.record_reversal(db, movement_id, payload, organization_id, allow_negative_stock=allow_negative_stock)
         db.commit()
         db.refresh(reversal)
         return reversal

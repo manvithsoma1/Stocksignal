@@ -283,6 +283,7 @@ def record_reversal(
     original_movement_id: uuid.UUID,
     reversal_in: ReversalCreate,
     organization_id: uuid.UUID,
+    allow_negative_stock: bool = False,
 ) -> InventoryMovement:
     """
     Reverse an existing movement by creating a REVERSAL movement with inverse postings.
@@ -314,6 +315,11 @@ def record_reversal(
         )
 
     # 3. Check if already reversed
+    if original.movement_type == MovementType.REVERSAL:
+        raise InvalidMovementError(
+            f"Cannot reverse movement {original.id}: Reversal movements cannot themselves be reversed."
+        )
+
     already_reversed = db.execute(
         select(InventoryMovement).where(
             InventoryMovement.organization_id == organization_id,
@@ -324,6 +330,21 @@ def record_reversal(
         raise MovementAlreadyReversedError(
             f"Movement {original.id} has already been reversed by {already_reversed.id}"
         )
+
+    # 4. Prevent reversal if it drives sellable stock negative
+    if not allow_negative_stock:
+        reversal_sellable_delta = sum(
+            -orig_post.quantity_delta
+            for orig_post in original.postings
+            if orig_post.bucket_type == BucketType.SELLABLE
+        )
+        if reversal_sellable_delta < 0:
+            current_balance = get_stock_balance(db, organization_id, original.store_id, original.product_id)
+            if current_balance.sellable + reversal_sellable_delta < 0:
+                raise InsufficientStockError(
+                    f"Cannot reverse movement {original.id}: Reversal would reduce SELLABLE stock below zero "
+                    f"(current: {current_balance.sellable}, deduction: {abs(reversal_sellable_delta)})"
+                )
 
     # 4. Create Reversal Movement header
     reversal_movement = InventoryMovement(
@@ -373,11 +394,15 @@ def record_reclassify(
     qty = abs(reclassify_in.quantity)
 
     # Validate balance in source bucket
-    if not allow_negative_stock and reclassify_in.from_bucket == BucketType.SELLABLE:
+    if not allow_negative_stock:
         current_balance = get_stock_balance(db, org_id, store_id, product_id)
-        if current_balance.sellable < qty:
+        if reclassify_in.from_bucket == BucketType.SELLABLE and current_balance.sellable < qty:
             raise InsufficientStockError(
                 f"Insufficient SELLABLE stock to reclassify: available {current_balance.sellable}, requested {qty}"
+            )
+        elif reclassify_in.from_bucket == BucketType.QUARANTINED and current_balance.quarantined < qty:
+            raise InsufficientStockError(
+                f"Insufficient QUARANTINED stock to reclassify: available {current_balance.quarantined}, requested {qty}"
             )
 
     postings = [
