@@ -12,7 +12,11 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Optional
 
-import lightgbm as lgb
+try:
+    import lightgbm as lgb
+except ImportError:
+    lgb = None
+
 import numpy as np
 import pandas as pd
 from sqlalchemy import text
@@ -22,12 +26,14 @@ from app.models.core import Product, Store, StoreProduct
 from app.services import ledger
 
 MODEL_PATH = Path(__file__).resolve().parent / "models" / "m5_lightgbm.txt"
-_BOOSTER: Optional[lgb.Booster] = None
+_BOOSTER: Optional[object] = None
 
 
-def get_booster() -> Optional[lgb.Booster]:
+def get_booster():
     """Load or return cached LightGBM model booster."""
     global _BOOSTER
+    if lgb is None:
+        return None
     if _BOOSTER is not None:
         return _BOOSTER
     if MODEL_PATH.exists():
