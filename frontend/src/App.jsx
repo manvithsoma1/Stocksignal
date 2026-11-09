@@ -7,8 +7,11 @@ import {
   ShieldCheck, 
   RefreshCw,
   Store as StoreIcon,
-  CheckCircle,
-  FileText
+  UploadCloud,
+  FileSpreadsheet,
+  CheckCircle2,
+  XCircle,
+  AlertCircle
 } from 'lucide-react';
 
 const API_BASE = 'http://localhost:8000/api/v1';
@@ -28,6 +31,13 @@ export default function App() {
   const [urgentBatches, setUrgentBatches] = useState([]);
   const [recentMovements, setRecentMovements] = useState([]);
 
+  // Upload Management State
+  const [uploadCategory, setUploadCategory] = useState('SALES');
+  const [uploadFile, setUploadFile] = useState(null);
+  const [uploadLoading, setUploadLoading] = useState(false);
+  const [uploadResult, setUploadResult] = useState(null);
+  const [uploadBatches, setUploadBatches] = useState([]);
+
   // Fetch initial stores
   useEffect(() => {
     fetchStores();
@@ -37,6 +47,7 @@ export default function App() {
   useEffect(() => {
     if (selectedStore) {
       loadStoreData(selectedStore.organization_id, selectedStore.id);
+      fetchUploadBatches(selectedStore.organization_id);
     }
   }, [selectedStore]);
 
@@ -100,6 +111,53 @@ export default function App() {
     }
   };
 
+  const fetchUploadBatches = async (orgId) => {
+    try {
+      const res = await fetch(`${API_BASE}/data/batches?organization_id=${orgId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setUploadBatches(data);
+      }
+    } catch (err) {
+      console.warn("Could not fetch batches:", err);
+    }
+  };
+
+  const handleFileUpload = async (e) => {
+    e.preventDefault();
+    if (!uploadFile || !selectedStore) return;
+
+    try {
+      setUploadLoading(true);
+      setUploadResult(null);
+
+      const formData = new FormData();
+      formData.append('file', uploadFile);
+      formData.append('organization_id', selectedStore.organization_id);
+      formData.append('category', uploadCategory);
+      formData.append('auto_process', 'true');
+
+      const res = await fetch(`${API_BASE}/data/upload`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      const data = await res.json();
+      setUploadResult(data);
+      setUploadFile(null);
+
+      // Refresh store & batches list
+      loadStoreData(selectedStore.organization_id, selectedStore.id);
+      fetchUploadBatches(selectedStore.organization_id);
+
+    } catch (err) {
+      console.error("Upload error:", err);
+      setUploadResult({ status: 'FAILED', error_summary: 'Network error submitting upload.' });
+    } finally {
+      setUploadLoading(false);
+    }
+  };
+
   return (
     <div className="app-container">
       {/* Sidebar */}
@@ -119,6 +177,14 @@ export default function App() {
           >
             <TrendingUp size={18} />
             <span>Overview & Health</span>
+          </div>
+
+          <div 
+            className={`nav-item ${activeTab === 'uploads' ? 'active' : ''}`}
+            onClick={() => setActiveTab('uploads')}
+          >
+            <UploadCloud size={18} />
+            <span>Data Ingestion</span>
           </div>
 
           <div 
@@ -184,7 +250,7 @@ export default function App() {
                 </select>
               ) : (
                 <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                  {loading ? 'Discovering stores...' : 'No stores registered. Run seed or migration.'}
+                  {loading ? 'Discovering stores...' : 'No stores registered.'}
                 </span>
               )}
             </div>
@@ -319,6 +385,113 @@ export default function App() {
                 <p style={{ color: 'var(--text-muted)', padding: '16px 0' }}>
                   No ledger transactions recorded for this store yet.
                 </p>
+              )}
+            </div>
+          </>
+        )}
+
+        {/* Data Ingestion & Management Screen */}
+        {activeTab === 'uploads' && (
+          <>
+            <div className="card">
+              <div className="card-title">
+                <span>Retail Dataset Ingestion Wizard</span>
+                <span className="badge badge-watch">CSV / Excel Parser</span>
+              </div>
+              <p style={{ color: 'var(--text-muted)', marginBottom: '20px' }}>
+                Upload POS sales logs, inventory snapshots, or Goods Received Notes (GRN). Data is validated for schema fidelity, duplicate-checked via SHA-256 hash, and ingested atomically into the double-entry ledger.
+              </p>
+
+              <form onSubmit={handleFileUpload} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: '16px', alignItems: 'end' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Dataset Category</label>
+                  <select 
+                    value={uploadCategory} 
+                    onChange={e => setUploadCategory(e.target.value)}
+                    style={{ width: '100%', background: 'var(--bg-secondary)', color: 'var(--text-main)', border: '1px solid var(--border)', padding: '8px 12px', borderRadius: '6px' }}
+                  >
+                    <option value="SALES">Daily POS Sales (sku, store_code, quantity, occurred_at)</option>
+                    <option value="INVENTORY_SNAPSHOT">Inventory Snapshot (sku, store_code, counted_qty)</option>
+                    <option value="GOODS_RECEIVED">Goods Received Notes (sku, store_code, quantity, invoice_number)</option>
+                    <option value="PHYSICAL_COUNT">Physical Audit Count (sku, store_code, bucket, quantity)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Select File</label>
+                  <input 
+                    type="file" 
+                    accept=".csv"
+                    onChange={e => setUploadFile(e.target.files[0])}
+                    style={{ width: '100%', background: 'var(--bg-secondary)', color: 'var(--text-main)', border: '1px solid var(--border)', padding: '6px 12px', borderRadius: '6px' }}
+                  />
+                </div>
+
+                <button 
+                  type="submit" 
+                  className="btn" 
+                  disabled={uploadLoading || !uploadFile}
+                  style={{ display: 'flex', alignItems: 'center', gap: '8px', height: '40px' }}
+                >
+                  <UploadCloud size={16} />
+                  {uploadLoading ? 'Ingesting...' : 'Import Dataset'}
+                </button>
+              </form>
+
+              {uploadResult && (
+                <div style={{ marginTop: '20px', padding: '16px', borderRadius: '8px', background: uploadResult.status === 'COMPLETED' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)', border: '1px solid ' + (uploadResult.status === 'COMPLETED' ? 'rgba(16, 185, 129, 0.4)' : 'rgba(239, 68, 68, 0.4)') }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontWeight: 600 }}>
+                    {uploadResult.status === 'COMPLETED' ? <CheckCircle2 size={18} color="var(--success)" /> : <AlertCircle size={18} color="var(--danger)" />}
+                    <span>Status: {uploadResult.status}</span>
+                  </div>
+                  <p style={{ fontSize: '0.85rem', marginTop: '6px' }}>
+                    File: <strong>{uploadResult.file_name}</strong> | Total: {uploadResult.total_rows} | Valid: {uploadResult.valid_rows} | Rejected: {uploadResult.rejected_rows}
+                  </p>
+                  {uploadResult.error_summary && (
+                    <p style={{ color: '#fca5a5', fontSize: '0.85rem', marginTop: '4px' }}>{uploadResult.error_summary}</p>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="card">
+              <div className="card-title">
+                <span>Dataset Ingestion Audit Log</span>
+                <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Historical Data Lineage</span>
+              </div>
+              {uploadBatches.length > 0 ? (
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Upload Date</th>
+                      <th>Category</th>
+                      <th>File Name</th>
+                      <th>Status</th>
+                      <th>Total Rows</th>
+                      <th>Valid Rows</th>
+                      <th>Rejections</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {uploadBatches.map(b => (
+                      <tr key={b.id}>
+                        <td>{new Date(b.created_at).toLocaleString()}</td>
+                        <td><strong>{b.category}</strong></td>
+                        <td>{b.file_name}</td>
+                        <td>
+                          <span className={`badge badge-${b.status.toLowerCase().replace('_', '-')}`}>
+                            {b.status}
+                          </span>
+                        </td>
+                        <td>{b.total_rows}</td>
+                        <td style={{ color: 'var(--success)' }}>{b.valid_rows}</td>
+                        <td style={{ color: b.rejected_rows > 0 ? 'var(--danger)' : 'var(--text-muted)' }}>{b.rejected_rows}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <p style={{ color: 'var(--text-muted)', padding: '16px 0' }}>No datasets uploaded yet.</p>
               )}
             </div>
           </>

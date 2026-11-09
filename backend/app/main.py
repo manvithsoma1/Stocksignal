@@ -4,6 +4,7 @@ from sqlalchemy import text
 from app.db.session import engine
 from app.api.inventory import router as inventory_router
 from app.api.decision_support import router as decision_support_router
+from app.api.uploads import router as uploads_router
 
 app = FastAPI(title="StockSignal API", version="0.1.0")
 
@@ -17,6 +18,7 @@ app.add_middleware(
 
 app.include_router(inventory_router)
 app.include_router(decision_support_router)
+app.include_router(uploads_router)
 
 @app.get("/")
 def root():
