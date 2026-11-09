@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.models.core import BucketType, Product, Store, StoreProduct
+from app.models.uploads import DataUploadBatch, UploadStatus
 from app.services import ledger, perishable, reconciliation, recommendations
 from app.services.forecasting import inference
 
@@ -104,9 +105,21 @@ def get_store_overview(
         stock_levels=stock_levels,
     )
 
+    # 5. Distinguish Demo Data vs. Real Uploaded Data
+    real_upload_count = db.execute(
+        select(DataUploadBatch).where(
+            DataUploadBatch.organization_id == organization_id,
+            DataUploadBatch.status == UploadStatus.COMPLETED,
+        )
+    ).scalars().all()
+
+    data_mode = "REAL_DATA_MODE" if len(real_upload_count) > 0 else "DEMO_SEED_MODE"
+
     return {
         "organization_id": organization_id,
         "store_id": store_id,
+        "data_mode": data_mode,
+        "uploaded_datasets_count": len(real_upload_count),
         "active_skus": active_skus,
         "urgent_perishable_count": len(urgent_batches),
         "total_value_at_risk": total_val_at_risk,

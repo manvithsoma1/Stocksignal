@@ -235,6 +235,102 @@ def process_sales_csv(
     batch.rejected_rows = rejected_count
     batch.completed_at = datetime.now(timezone.utc)
 
+    db.commit()
+    db.refresh(batch)
+    return batch
+
+
+def process_goods_received_csv(
+    db: Session,
+    batch: DataUploadBatch,
+    file_bytes: bytes,
+) -> DataUploadBatch:
+    """
+    Ingest validated GOODS_RECEIVED (GRN) records into inventory ledger movements.
+    Adds stock to SELLABLE bucket.
+    """
+    batch.status = UploadStatus.PROCESSING
+    db.commit()
+
+    _, rows = parse_csv_stream(file_bytes)
+    valid_count = 0
+    rejected_count = 0
+    errors = []
+
+    for idx, r in enumerate(rows, start=2):
+        sku = r.get("sku", "").strip()
+        store_code = r.get("store_code", "").strip()
+        qty_str = r.get("quantity", "").strip()
+        invoice = r.get("invoice_number", f"INV-{batch.id}").strip()
+
+        # 1. Validate Store
+        store = db.execute(
+            select(Store).where(
+                Store.organization_id == batch.organization_id,
+                Store.store_code == store_code,
+            )
+        ).scalar_one_or_none()
+        if not store:
+            rejected_count += 1
+            errors.append(f"Row {idx}: Unknown store_code '{store_code}'")
+            continue
+
+        # 2. Validate Product
+        product = db.execute(
+            select(Product).where(
+                Product.organization_id == batch.organization_id,
+                Product.sku == sku,
+            )
+        ).scalar_one_or_none()
+        if not product:
+            rejected_count += 1
+            errors.append(f"Row {idx}: Unknown product SKU '{sku}'")
+            continue
+
+        # 3. Parse Quantity
+        try:
+            qty = Decimal(qty_str)
+            if qty <= 0:
+                raise ValueError("Quantity must be positive")
+        except (InvalidOperation, ValueError):
+            rejected_count += 1
+            errors.append(f"Row {idx}: Invalid quantity value '{qty_str}'")
+            continue
+
+        # 4. Record GRN_RECEIPT movement
+        try:
+            delta = abs(qty)
+            idempotency_key = f"UPLOAD_GRN_{batch.id}_ROW_{idx}"
+            ledger.record_movement(
+                db,
+                MovementCreate(
+                    organization_id=batch.organization_id,
+                    store_id=store.id,
+                    product_id=product.id,
+                    movement_type=MovementType.GRN_RECEIPT,
+                    quantity_delta=delta,
+                    occurred_at=datetime.now(timezone.utc),
+                    source_system="CSV_GRN_INGESTION",
+                    external_document_id=invoice,
+                    source_line_number=str(idx),
+                    idempotency_key=idempotency_key,
+                    postings=[
+                        PostingSpec(
+                            bucket_type=BucketType.SELLABLE,
+                            quantity_delta=delta,
+                        )
+                    ],
+                ),
+            )
+            valid_count += 1
+        except Exception as e:
+            rejected_count += 1
+            errors.append(f"Row {idx}: Ledger rejection: {str(e)}")
+
+    batch.valid_rows = valid_count
+    batch.rejected_rows = rejected_count
+    batch.completed_at = datetime.now(timezone.utc)
+
     if rejected_count == 0:
         batch.status = UploadStatus.COMPLETED
     elif valid_count > 0:

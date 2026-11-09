@@ -272,7 +272,14 @@ export default function App() {
       <main className="main-content">
         <div className="top-bar">
           <div>
-            <h1 style={{ fontSize: '1.6rem', fontWeight: 700 }}>Operational Decision Support</h1>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <h1 style={{ fontSize: '1.6rem', fontWeight: 700 }}>Operational Decision Support</h1>
+              {overview?.data_mode && (
+                <span className={`badge ${overview.data_mode === 'REAL_DATA_MODE' ? 'badge-safe' : 'badge-watch'}`}>
+                  {overview.data_mode === 'REAL_DATA_MODE' ? '● Real Retailer Data' : '○ Demo Environment'}
+                </span>
+              )}
+            </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '6px' }}>
               <StoreIcon size={16} color="var(--accent)" />
               <label style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>Active Store:</label>

@@ -45,6 +45,8 @@ async def upload_dataset_file(
     if auto_process and batch.status == UploadStatus.READY_TO_IMPORT:
         if category == DatasetCategory.SALES:
             batch = ingestion.process_sales_csv(db, batch, content)
+        elif category == DatasetCategory.GOODS_RECEIVED:
+            batch = ingestion.process_goods_received_csv(db, batch, content)
 
     return {
         "batch_id": batch.id,
@@ -91,3 +93,4 @@ def list_upload_batches(
         }
         for b in batches
     ]
+
