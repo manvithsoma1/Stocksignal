@@ -94,3 +94,36 @@ def list_upload_batches(
         for b in batches
     ]
 
+
+@router.post("/preview")
+async def preview_dataset_file(
+    file: UploadFile = File(...),
+    category: DatasetCategory = Form(...),
+):
+    """
+    Inspect an uploaded file (CSV or Excel) and return:
+      - Detected headers
+      - Expected columns for the category
+      - Missing columns / matched columns
+      - First 5 preview rows
+    """
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded file is empty.")
+
+    headers, rows = ingestion.parse_tabular_stream(file.filename or "data.csv", content)
+    required = ingestion.REQUIRED_COLUMNS.get(category, [])
+    matched_cols = [c for c in required if c in headers]
+    missing_cols = [c for c in required if c not in headers]
+
+    return {
+        "file_name": file.filename,
+        "total_detected_rows": len(rows),
+        "headers": headers,
+        "required_columns": required,
+        "matched_columns": matched_cols,
+        "missing_columns": missing_cols,
+        "is_valid_schema": len(missing_cols) == 0,
+        "sample_preview": rows[:5],
+    }
+

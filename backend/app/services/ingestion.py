@@ -40,21 +40,51 @@ def compute_sha256(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
+def parse_tabular_stream(file_name: str, content: bytes) -> Tuple[list[str], list[dict[str, str]]]:
+    """
+    Parse raw file bytes (CSV or Excel) into header list and list of row dicts.
+    Supports .csv, .xlsx, .xls.
+    """
+    ext = file_name.lower().split(".")[-1] if "." in file_name else "csv"
+
+    if ext in ("xlsx", "xls"):
+        import openpyxl
+        wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
+        sheet = wb.active
+        rows = list(sheet.iter_rows(values_only=True))
+        if not rows:
+            return [], []
+        headers = [str(h).strip().lower() for h in rows[0] if h is not None]
+        data = []
+        for r in rows[1:]:
+            if not any(r):
+                continue
+            row_dict = {
+                headers[i]: str(r[i]).strip() if i < len(r) and r[i] is not None else ""
+                for i in range(len(headers))
+            }
+            data.append(row_dict)
+        return headers, data
+    else:
+        # Default CSV parsing
+        text = content.decode("utf-8", errors="replace")
+        reader = csv.reader(io.StringIO(text))
+        rows = list(reader)
+        if not rows:
+            return [], []
+        headers = [h.strip().lower() for h in rows[0]]
+        data = []
+        for r in rows[1:]:
+            if not any(r):  # skip empty lines
+                continue
+            row_dict = {headers[i]: r[i].strip() if i < len(r) else "" for i in range(len(headers))}
+            data.append(row_dict)
+        return headers, data
+
+
 def parse_csv_stream(content: bytes) -> Tuple[list[str], list[dict[str, str]]]:
-    """Parse raw bytes into header list and list of row dicts."""
-    text = content.decode("utf-8", errors="replace")
-    reader = csv.reader(io.StringIO(text))
-    rows = list(reader)
-    if not rows:
-        return [], []
-    headers = [h.strip().lower() for h in rows[0]]
-    data = []
-    for r in rows[1:]:
-        if not any(r):  # skip empty lines
-            continue
-        row_dict = {headers[i]: r[i].strip() if i < len(r) else "" for i in range(len(headers))}
-        data.append(row_dict)
-    return headers, data
+    """Backwards-compatible alias for CSV parsing."""
+    return parse_tabular_stream("data.csv", content)
 
 
 def validate_and_stage_upload(
@@ -98,9 +128,10 @@ def validate_and_stage_upload(
         db.refresh(batch)
         return batch
 
-    # Parse headers and rows
-    headers, rows = parse_csv_stream(file_bytes)
+    # Parse headers and rows (CSV or Excel)
+    headers, rows = parse_tabular_stream(file_name, file_bytes)
     total_rows = len(rows)
+    file_format = file_name.split(".")[-1].upper() if "." in file_name else "CSV"
 
     required = REQUIRED_COLUMNS.get(category, [])
     missing_cols = [c for c in required if c not in headers]
@@ -154,7 +185,7 @@ def process_sales_csv(
     batch.status = UploadStatus.PROCESSING
     db.commit()
 
-    _, rows = parse_csv_stream(file_bytes)
+    _, rows = parse_tabular_stream(batch.file_name, file_bytes)
     valid_count = 0
     rejected_count = 0
     errors = []
@@ -252,7 +283,7 @@ def process_goods_received_csv(
     batch.status = UploadStatus.PROCESSING
     db.commit()
 
-    _, rows = parse_csv_stream(file_bytes)
+    _, rows = parse_tabular_stream(batch.file_name, file_bytes)
     valid_count = 0
     rejected_count = 0
     errors = []

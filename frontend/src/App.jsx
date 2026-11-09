@@ -42,6 +42,7 @@ export default function App() {
   const [uploadCategory, setUploadCategory] = useState('SALES');
   const [uploadFile, setUploadFile] = useState(null);
   const [uploadLoading, setUploadLoading] = useState(false);
+  const [uploadPreview, setUploadPreview] = useState(null);
   const [uploadResult, setUploadResult] = useState(null);
   const [uploadBatches, setUploadBatches] = useState([]);
 
@@ -162,6 +163,30 @@ export default function App() {
     }
   };
 
+  const handleFileChange = async (file) => {
+    setUploadFile(file);
+    setUploadPreview(null);
+    setUploadResult(null);
+    if (!file) return;
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('category', uploadCategory);
+
+      const res = await fetch(`${API_BASE}/data/preview`, {
+        method: 'POST',
+        body: formData,
+      });
+      if (res.ok) {
+        const preview = await res.json();
+        setUploadPreview(preview);
+      }
+    } catch (err) {
+      console.warn("Could not generate file preview:", err);
+    }
+  };
+
   const handleFileUpload = async (e) => {
     e.preventDefault();
     if (!uploadFile || !selectedStore) return;
@@ -184,6 +209,7 @@ export default function App() {
       const data = await res.json();
       setUploadResult(data);
       setUploadFile(null);
+      setUploadPreview(null);
 
       // Refresh store & batches list
       loadStoreData(selectedStore.organization_id, selectedStore.id);
@@ -556,11 +582,11 @@ export default function App() {
                 </div>
 
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Select File</label>
+                  <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Select File (CSV or Excel)</label>
                   <input 
                     type="file" 
-                    accept=".csv"
-                    onChange={e => setUploadFile(e.target.files[0])}
+                    accept=".csv, .xlsx, .xls"
+                    onChange={e => handleFileChange(e.target.files[0])}
                     style={{ width: '100%', background: 'var(--bg-secondary)', color: 'var(--text-main)', border: '1px solid var(--border)', padding: '6px 12px', borderRadius: '6px' }}
                   />
                 </div>
@@ -575,6 +601,53 @@ export default function App() {
                   {uploadLoading ? 'Ingesting...' : 'Import Dataset'}
                 </button>
               </form>
+
+              {/* Real-time File Schema & Column Mapping Preview */}
+              {uploadPreview && (
+                <div style={{ marginTop: '20px', padding: '16px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '8px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <FileSpreadsheet size={18} color="var(--accent)" />
+                      <strong>File Inspection: {uploadPreview.file_name}</strong>
+                    </div>
+                    <span className={`badge ${uploadPreview.is_valid_schema ? 'badge-safe' : 'badge-critical'}`}>
+                      {uploadPreview.is_valid_schema ? 'Schema Valid & Matched' : 'Missing Required Columns'}
+                    </span>
+                  </div>
+
+                  <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '12px' }}>
+                    Total Rows Detected: <strong>{uploadPreview.total_detected_rows}</strong> | Matched: {uploadPreview.matched_columns.join(', ')}
+                    {uploadPreview.missing_columns.length > 0 && (
+                      <span style={{ color: 'var(--danger)', marginLeft: '12px' }}>
+                        Missing: {uploadPreview.missing_columns.join(', ')}
+                      </span>
+                    )}
+                  </div>
+
+                  {uploadPreview.sample_preview && uploadPreview.sample_preview.length > 0 && (
+                    <div style={{ overflowX: 'auto' }}>
+                      <table style={{ fontSize: '0.8rem' }}>
+                        <thead>
+                          <tr>
+                            {uploadPreview.headers.map((h, i) => (
+                              <th key={i}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {uploadPreview.sample_preview.map((row, idx) => (
+                            <tr key={idx}>
+                              {uploadPreview.headers.map((h, i) => (
+                                <td key={i}>{row[h]}</td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {uploadResult && (
                 <div style={{ marginTop: '20px', padding: '16px', borderRadius: '8px', background: uploadResult.status === 'COMPLETED' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)', border: '1px solid ' + (uploadResult.status === 'COMPLETED' ? 'rgba(16, 185, 129, 0.4)' : 'rgba(239, 68, 68, 0.4)') }}>
