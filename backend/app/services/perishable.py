@@ -346,8 +346,8 @@ def assess_product(
     rank_batches(assessments)
 
     # Build aggregate metrics
-    total_at_risk = sum(a.estimated_unsold_qty for a in assessments)
-    total_value = sum(a.value_at_risk for a in assessments)
+    total_at_risk = sum((a.estimated_unsold_qty for a in assessments), Decimal("0.000"))
+    total_value = sum((a.value_at_risk for a in assessments), Decimal("0.000"))
     worst = _max_tier(*[a.risk_tier for a in assessments]) if assessments else RiskTier.SAFE
 
     # FEFO recommendation text

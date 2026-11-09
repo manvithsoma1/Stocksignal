@@ -130,7 +130,7 @@ def get_store_overview(
 
     # 4. Generate recommendations dynamically
     perishable_reports = []
-    for sp in sp_list:
+    for sp in sp_count:  # sp_count is the full list of active StoreProduct rows
         p_report = perishable.assess_product(
             db=db,
             org_id=organization_id,
@@ -155,6 +155,38 @@ def get_store_overview(
 
     data_mode = "REAL_DATA_MODE" if len(real_upload_count) > 0 else "DEMO_SEED_MODE"
 
+    # Serialize dataclass objects so FastAPI can JSON-encode them
+    def _serialize_batch(b: perishable.BatchRiskAssessment) -> dict:
+        return {
+            "batch_id": str(b.batch_id),
+            "batch_code": b.batch_code,
+            "sku": b.sku,
+            "expiry_date": b.expiry_date.isoformat() if b.expiry_date else None,
+            "days_remaining": b.days_remaining,
+            "current_qty": float(b.current_qty),
+            "estimated_unsold_qty": float(b.estimated_unsold_qty),
+            "value_at_risk": float(b.value_at_risk),
+            "risk_tier": b.risk_tier.value,
+            "fefo_rank": b.fefo_rank,
+            "confidence_level": b.confidence_level,
+            "assumptions": b.assumptions,
+            "notes": b.notes,
+        }
+
+    def _serialize_rec(r: recommendations.ActionRecommendation) -> dict:
+        return {
+            "recommendation_id": r.recommendation_id,
+            "sku": r.sku,
+            "action_type": r.action_type.value,
+            "priority": r.priority.value,
+            "reason": r.reason,
+            "suggested_action_summary": r.suggested_action_summary,
+            "predicted_opportunity_value": float(r.predicted_opportunity_value),
+            "estimated_benefit_value": float(r.estimated_benefit_value),
+            "requires_approval": r.requires_approval,
+            "status": r.status,
+        }
+
     return {
         "organization_id": organization_id,
         "store_id": store_id,
@@ -162,10 +194,10 @@ def get_store_overview(
         "uploaded_datasets_count": len(real_upload_count),
         "active_skus": active_skus,
         "urgent_perishable_count": len(urgent_batches),
-        "total_value_at_risk": total_val_at_risk,
+        "total_value_at_risk": float(total_val_at_risk),
         "pending_recommendations_count": len(recs),
-        "urgent_batches": urgent_batches[:5],
-        "top_recommendations": recs[:5],
+        "urgent_batches": [_serialize_batch(b) for b in urgent_batches[:5]],
+        "top_recommendations": [_serialize_rec(r) for r in recs[:5]],
     }
 
 
@@ -199,7 +231,29 @@ def get_urgent_batches(
         store_id=store_id,
         min_tier=min_tier,
     )
-    return urgent
+    return [
+        {
+            "batch_id": str(b.batch_id),
+            "batch_code": b.batch_code,
+            "org_id": str(b.org_id),
+            "store_id": str(b.store_id),
+            "product_id": str(b.product_id),
+            "sku": b.sku,
+            "expiry_date": b.expiry_date.isoformat() if b.expiry_date else None,
+            "days_remaining": b.days_remaining,
+            "current_qty": float(b.current_qty),
+            "avg_daily_demand": float(b.avg_daily_demand),
+            "expected_demand_before_expiry": float(b.expected_demand_before_expiry),
+            "estimated_unsold_qty": float(b.estimated_unsold_qty),
+            "value_at_risk": float(b.value_at_risk),
+            "risk_tier": b.risk_tier.value,
+            "fefo_rank": b.fefo_rank,
+            "confidence_level": b.confidence_level,
+            "assumptions": b.assumptions,
+            "notes": b.notes,
+        }
+        for b in urgent
+    ]
 
 
 @router.get("/recommendations")
@@ -260,7 +314,32 @@ def get_action_recommendations(
     except Exception:
         # Never break retrieval if background persistence has a transient issue
         pass
-    return filtered
+
+    # Serialize dataclass objects so FastAPI can JSON-encode them
+    return [
+        {
+            "recommendation_id": r.recommendation_id,
+            "org_id": str(r.org_id),
+            "store_id": str(r.store_id),
+            "product_id": str(r.product_id),
+            "sku": r.sku,
+            "store_code": r.store_code,
+            "action_type": r.action_type.value,
+            "priority": r.priority.value,
+            "reason": r.reason,
+            "detail": r.detail,
+            "suggested_action_summary": r.suggested_action_summary,
+            "predicted_opportunity_value": float(r.predicted_opportunity_value),
+            "estimated_benefit_value": float(r.estimated_benefit_value),
+            "requires_approval": r.requires_approval,
+            "approval_role": r.approval_role,
+            "status": r.status,
+            "generated_at": r.generated_at.isoformat(),
+            "perishable_tier": r.perishable_tier.value if r.perishable_tier else None,
+            "stock_vs_reorder": r.stock_vs_reorder,
+        }
+        for r in filtered
+    ]
 
 
 @router.post("/recommendations/{id}/approve")
