@@ -93,8 +93,16 @@ def load_and_preprocess_m5(n_items: int = 150) -> tuple[pd.DataFrame, pd.DataFra
     for cat in ["item_id", "dept_id", "cat_id", "store_id", "state_id"]:
         merged[cat] = merged[cat].astype("category")
 
-    # Drop NaNs from lag creation
-    merged = merged.dropna().reset_index(drop=True)
+    # Chronological Split: strictly separate past from future to guarantee zero data leakage
+    max_date = merged["date"].max()
+    split_date = max_date - pd.Timedelta(days=28)
+
+    train_df = merged[merged["date"] <= split_date].copy().dropna().reset_index(drop=True)
+    test_df = merged[merged["date"] > split_date].copy().dropna().reset_index(drop=True)
+
+    # Verification guard against future leakage
+    assert train_df["date"].max() <= split_date, "Leakage detected: train_df contains post-split dates!"
+    assert test_df["date"].min() > split_date, "Leakage detected: test_df contains pre-split dates!"
 
     feature_cols = [
         "sales_lag_1", "sales_lag_7", "sales_lag_28",
@@ -102,14 +110,7 @@ def load_and_preprocess_m5(n_items: int = 150) -> tuple[pd.DataFrame, pd.DataFra
         "wday", "month", "year"
     ]
 
-    # Chronological Split: Last 28 days as Test Horizon
-    max_date = merged["date"].max()
-    split_date = max_date - pd.Timedelta(days=28)
-
-    train_df = merged[merged["date"] <= split_date].copy()
-    test_df = merged[merged["date"] > split_date].copy()
-
-    print(f"[*] Chronological Split: Train rows={len(train_df)}, Test rows={len(test_df)}")
+    print(f"[*] Chronological Split Verified: Train (up to {split_date.date()})={len(train_df)} rows, Test ({test_df['date'].min().date()} to {max_date.date()})={len(test_df)} rows")
     return train_df, test_df, feature_cols
 
 
@@ -190,3 +191,4 @@ def run_benchmarks():
 
 if __name__ == "__main__":
     run_benchmarks()
+

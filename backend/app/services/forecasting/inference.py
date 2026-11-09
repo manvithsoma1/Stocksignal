@@ -54,10 +54,10 @@ def forecast_sku_demand(
     bal = ledger.get_stock_balance(db, org_id, store_id, product_id)
     current_stock = bal.sellable
 
-    # 2. Fetch historical sales velocity (last 28 days)
-    sales_history_query = text(
+    # 2. Fetch historical sales velocity and daily time series (last 28 days)
+    sales_daily_query = text(
         """
-        SELECT COALESCE(SUM(ABS(p.quantity_delta)), 0)
+        SELECT DATE(m.occurred_at) as sale_date, COALESCE(SUM(ABS(p.quantity_delta)), 0) as daily_units
         FROM inventory_movement_postings p
         JOIN inventory_movements m ON m.id = p.movement_id
         WHERE m.organization_id = :org_id
@@ -66,19 +66,25 @@ def forecast_sku_demand(
           AND m.movement_type = 'SALE'
           AND p.bucket_type = 'SELLABLE'
           AND m.occurred_at >= NOW() - INTERVAL '28 days'
+        GROUP BY DATE(m.occurred_at)
+        ORDER BY sale_date ASC
         """
     )
-    total_28d_sales = Decimal(str(db.execute(sales_history_query, {
+    daily_rows = db.execute(sales_daily_query, {
         "org_id": org_id, "store_id": store_id, "product_id": product_id
-    }).scalar() or 0))
+    }).all()
 
-    avg_daily_sales = (total_28d_sales / Decimal("28")).quantize(Decimal("0.001"))
+    has_uploaded_sales = len(daily_rows) >= 7
+    total_sales_units = sum(Decimal(str(r.daily_units)) for r in daily_rows) if daily_rows else Decimal("0.000")
+    avg_daily_sales = (total_sales_units / Decimal(str(len(daily_rows) if daily_rows else 28))).quantize(Decimal("0.001"))
 
     # 3. Model Prediction (LightGBM if available, Seasonal Naive fallback)
     booster = get_booster()
     daily_predictions = []
-    
-    base_rate = float(avg_daily_sales) if avg_daily_sales > 0 else 5.0  # reasonable retail prior if fresh SKU
+
+    # If real store transactions exist, use their empirical velocity; otherwise fall back to baseline retail prior
+    base_rate = float(avg_daily_sales) if (daily_rows and avg_daily_sales > 0) else 5.0
+    data_source_label = "STORE_TRANSACTION_HISTORY" if has_uploaded_sales else "RETAIL_PRIOR_BASELINE"
 
     for day in range(1, horizon_days + 1):
         if booster is not None:
@@ -92,7 +98,7 @@ def forecast_sku_demand(
             ]])
             pred = float(np.clip(booster.predict(features)[0], 0, None))
         else:
-            # Seasonal Naive baseline projection
+            # Seasonal Naive baseline projection (Friday/Saturday weekend retail weighting)
             weekend_boost = 1.3 if day % 7 in (5, 6) else 1.0
             pred = base_rate * weekend_boost
 
@@ -124,5 +130,8 @@ def forecast_sku_demand(
         "days_of_supply": round(days_of_supply, 1),
         "stockout_risk": stockout_risk,
         "daily_forecast": daily_predictions,
+        "data_source": data_source_label,
+        "historical_days_recorded": len(daily_rows),
         "model_used": "LightGBM (m5_lightgbm.txt)" if booster else "Seasonal Naive Baseline",
     }
+
