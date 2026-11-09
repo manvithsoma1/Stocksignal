@@ -28,6 +28,7 @@ build/
 .env.local
 .env.*.local
 !.env.example
+!.env.production.example
 
 # Database data
 pgdata/

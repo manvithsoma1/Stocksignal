@@ -1,0 +1,27 @@
+services:
+  # ── FastAPI Backend ──────────────────────────────────────────────
+  - type: web
+    name: stocksignal-api
+    runtime: docker
+    dockerfilePath: backend/Dockerfile
+    dockerContext: backend
+    plan: free
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: stocksignal-db
+          property: connectionString
+      - key: APP_ENV
+        value: production
+      - key: DB_SSLMODE
+        value: require
+      - key: ENABLE_TENANT_ISOLATION
+        value: "true"
+    healthCheckPath: /health
+
+databases:
+  # ── PostgreSQL (free tier, 90-day TTL on Render free plan) ───────
+  - name: stocksignal-db
+    plan: free
+    databaseName: stocksignal
+    user: stocksignal_user
