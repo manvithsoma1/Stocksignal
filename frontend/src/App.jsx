@@ -29,6 +29,7 @@ export default function App() {
   // Dynamic data states
   const [overview, setOverview] = useState(null);
   const [recommendations, setRecommendations] = useState([]);
+  const [outcomeSummary, setOutcomeSummary] = useState(null);
   const [urgentBatches, setUrgentBatches] = useState([]);
   const [recentMovements, setRecentMovements] = useState([]);
 
@@ -143,11 +144,64 @@ export default function App() {
         setRecentMovements(histData);
       }
 
+      // 5. Fetch Outcome Tracking Summary
+      const outcomeRes = await fetch(`${API_BASE}/decision-support/recommendations/outcomes/summary?organization_id=${orgId}&store_id=${storeId}`);
+      if (outcomeRes.ok) {
+        const outcomeData = await outcomeRes.json();
+        setOutcomeSummary(outcomeData);
+      }
+
     } catch (err) {
       console.error("Data load error:", err);
       setError("Error synchronizing store operational metrics.");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleApproveRec = async (recId) => {
+    if (!selectedStore) return;
+    try {
+      const res = await fetch(`${API_BASE}/decision-support/recommendations/${recId}/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          organization_id: selectedStore.organization_id,
+          approver_name: 'Store Manager',
+          notes: 'Authorized via Decision Support Console',
+        }),
+      });
+      if (res.ok) {
+        loadStoreData(selectedStore.organization_id, selectedStore.id);
+      } else {
+        const err = await res.json();
+        alert(`Approval error: ${err.detail || 'Could not approve recommendation'}`);
+      }
+    } catch (e) {
+      alert(`Approval request failed: ${e.message}`);
+    }
+  };
+
+  const handleRejectRec = async (recId) => {
+    if (!selectedStore) return;
+    try {
+      const res = await fetch(`${API_BASE}/decision-support/recommendations/${recId}/reject`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          organization_id: selectedStore.organization_id,
+          rejecter_name: 'Store Manager',
+          reason: 'Dismissed by store operator',
+        }),
+      });
+      if (res.ok) {
+        loadStoreData(selectedStore.organization_id, selectedStore.id);
+      } else {
+        const err = await res.json();
+        alert(`Dismiss error: ${err.detail || 'Could not dismiss recommendation'}`);
+      }
+    } catch (e) {
+      alert(`Dismiss request failed: ${e.message}`);
     }
   };
 
@@ -835,80 +889,116 @@ export default function App() {
 
         {/* Recommendations View */}
         {activeTab === 'recommendations' && (
-          <div className="card">
-            <div className="card-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span>Decision-Support Recommendations (Human-in-the-Loop)</span>
-              <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                Explainable suggestions • Human approval required
-              </span>
-            </div>
-            <div style={{ padding: '8px 12px', background: 'var(--bg-secondary)', borderLeft: '3px solid var(--accent)', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '14px', borderRadius: '4px' }}>
-              🛡️ <strong>Operational Safeguard:</strong> Recommendations are explainable decision aids synthesized from physical discrepancy audits, ML forecasts, and FEFO expiry risk. No price changes or inventory orders execute without authorized human sign-off.
-            </div>
-            {recommendations.length > 0 ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                {recommendations.map(r => (
-                  <div key={r.recommendation_id} style={{ padding: '16px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '8px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span className={`badge badge-${r.priority.toLowerCase()}`}>{r.priority}</span>
-                        <strong style={{ color: 'var(--accent)' }}>{r.action_type}</strong>
-                        {r.detail?.recommended_markdown_pct ? (
-                          <span className="badge" style={{ background: '#f59e0b', color: '#fff' }}>
-                            {r.detail.recommended_markdown_pct}% Markdown Review
-                          </span>
-                        ) : null}
-                      </div>
-                      <span style={{ fontSize: '0.75rem', padding: '3px 8px', borderRadius: '4px', background: 'rgba(59, 130, 246, 0.1)', color: '#3b82f6', border: '1px solid rgba(59, 130, 246, 0.3)' }}>
-                        👤 Requires {r.approval_role || 'STORE_MANAGER'} Sign-off
-                      </span>
-                    </div>
-
-                    {r.suggested_action_summary && (
-                      <div style={{ fontWeight: 600, fontSize: '0.92rem', marginBottom: '6px' }}>
-                        {r.suggested_action_summary}
-                      </div>
-                    )}
-
-                    <p style={{ fontSize: '0.86rem', color: 'var(--text-muted)', marginBottom: '10px', lineHeight: 1.4 }}>
-                      {r.reason}
-                    </p>
-
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '8px', borderTop: '1px solid var(--border)' }}>
-                      <div style={{ display: 'flex', gap: '16px', fontSize: '0.8rem' }}>
-                        {r.sku && <span>Target SKU: <code>{r.sku}</code></span>}
-                        {Number(r.predicted_opportunity_value) > 0 && (
-                          <span>Exposure: <strong>₹{Number(r.predicted_opportunity_value).toLocaleString()}</strong></span>
-                        )}
-                        {Number(r.estimated_benefit_value) > 0 && (
-                          <span style={{ color: 'var(--success)' }}>Est. Recovery: <strong>₹{Number(r.estimated_benefit_value).toLocaleString()}</strong></span>
-                        )}
-                      </div>
-                      <div style={{ display: 'flex', gap: '8px' }}>
-                        <button 
-                          className="btn btn-primary" 
-                          style={{ padding: '5px 12px', fontSize: '0.78rem' }}
-                          onClick={() => alert(`Recommendation ${r.recommendation_id.slice(0, 8)} approved for SKU ${r.sku}.`)}
-                        >
-                          Approve Action
-                        </button>
-                        <button 
-                          className="btn" 
-                          style={{ padding: '5px 10px', fontSize: '0.78rem', background: 'transparent', border: '1px solid var(--border)' }}
-                          onClick={() => alert(`Recommendation ${r.recommendation_id.slice(0, 8)} dismissed.`)}
-                        >
-                          Dismiss
-                        </button>
-                      </div>
-                    </div>
+          <div>
+            {/* Outcome Tracking Summary Dashboard */}
+            {outcomeSummary?.financial_outcomes && (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px', marginBottom: '16px' }}>
+                <div className="card" style={{ padding: '14px', borderLeft: '4px solid #ef4444' }}>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Predicted Opportunity (Exposure)</div>
+                  <div style={{ fontSize: '1.25rem', fontWeight: 700, marginTop: '4px' }}>
+                    ₹{Number(outcomeSummary.financial_outcomes.predicted_opportunity_value).toLocaleString()}
                   </div>
-                ))}
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '2px' }}>Total identified inventory at risk</div>
+                </div>
+                <div className="card" style={{ padding: '14px', borderLeft: '4px solid #3b82f6' }}>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Estimated Benefit (Modeled)</div>
+                  <div style={{ fontSize: '1.25rem', fontWeight: 700, marginTop: '4px', color: '#3b82f6' }}>
+                    ₹{Number(outcomeSummary.financial_outcomes.estimated_benefit_value).toLocaleString()}
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '2px' }}>Projected clearance & replenishment recovery</div>
+                </div>
+                <div className="card" style={{ padding: '14px', borderLeft: '4px solid #10b981' }}>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Verified Realized Benefit</div>
+                  <div style={{ fontSize: '1.25rem', fontWeight: 700, marginTop: '4px', color: '#10b981' }}>
+                    ₹{Number(outcomeSummary.financial_outcomes.verified_realized_benefit).toLocaleString()}
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '2px' }}>Audited post-execution actual outcome</div>
+                </div>
+                <div className="card" style={{ padding: '14px', borderLeft: '4px solid #8b5cf6' }}>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Realization Rate</div>
+                  <div style={{ fontSize: '1.25rem', fontWeight: 700, marginTop: '4px', color: '#8b5cf6' }}>
+                    {outcomeSummary.financial_outcomes.benefit_realization_rate_pct}%
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '2px' }}>Realized vs. estimated conversion</div>
+                </div>
               </div>
-            ) : (
-              <p style={{ color: 'var(--text-muted)', padding: '16px 0' }}>
-                No interventions required. All inventory indicators are healthy.
-              </p>
             )}
+
+            <div className="card">
+              <div className="card-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span>Decision-Support Recommendations (Human-in-the-Loop)</span>
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                  Explainable suggestions • Human approval required
+                </span>
+              </div>
+              <div style={{ padding: '8px 12px', background: 'var(--bg-secondary)', borderLeft: '3px solid var(--accent)', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '14px', borderRadius: '4px' }}>
+                🛡️ <strong>Operational Safeguard:</strong> Recommendations are explainable decision aids synthesized from physical discrepancy audits, ML forecasts, and FEFO expiry risk. No price changes or inventory orders execute without authorized human sign-off.
+              </div>
+              {recommendations.length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                  {recommendations.map(r => (
+                    <div key={r.recommendation_id} style={{ padding: '16px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '8px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span className={`badge badge-${r.priority.toLowerCase()}`}>{r.priority}</span>
+                          <strong style={{ color: 'var(--accent)' }}>{r.action_type}</strong>
+                          {r.detail?.recommended_markdown_pct ? (
+                            <span className="badge" style={{ background: '#f59e0b', color: '#fff' }}>
+                              {r.detail.recommended_markdown_pct}% Markdown Review
+                            </span>
+                          ) : null}
+                        </div>
+                        <span style={{ fontSize: '0.75rem', padding: '3px 8px', borderRadius: '4px', background: 'rgba(59, 130, 246, 0.1)', color: '#3b82f6', border: '1px solid rgba(59, 130, 246, 0.3)' }}>
+                          👤 Requires {r.approval_role || 'STORE_MANAGER'} Sign-off
+                        </span>
+                      </div>
+
+                      {r.suggested_action_summary && (
+                        <div style={{ fontWeight: 600, fontSize: '0.92rem', marginBottom: '6px' }}>
+                          {r.suggested_action_summary}
+                        </div>
+                      )}
+
+                      <p style={{ fontSize: '0.86rem', color: 'var(--text-muted)', marginBottom: '10px', lineHeight: 1.4 }}>
+                        {r.reason}
+                      </p>
+
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '8px', borderTop: '1px solid var(--border)' }}>
+                        <div style={{ display: 'flex', gap: '16px', fontSize: '0.8rem' }}>
+                          {r.sku && <span>Target SKU: <code>{r.sku}</code></span>}
+                          {Number(r.predicted_opportunity_value) > 0 && (
+                            <span>Exposure: <strong>₹{Number(r.predicted_opportunity_value).toLocaleString()}</strong></span>
+                          )}
+                          {Number(r.estimated_benefit_value) > 0 && (
+                            <span style={{ color: 'var(--success)' }}>Est. Recovery: <strong>₹{Number(r.estimated_benefit_value).toLocaleString()}</strong></span>
+                          )}
+                        </div>
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <button 
+                            className="btn btn-primary" 
+                            style={{ padding: '5px 12px', fontSize: '0.78rem' }}
+                            onClick={() => handleApproveRec(r.recommendation_id)}
+                          >
+                            Approve Action
+                          </button>
+                          <button 
+                            className="btn" 
+                            style={{ padding: '5px 10px', fontSize: '0.78rem', background: 'transparent', border: '1px solid var(--border)' }}
+                            onClick={() => handleRejectRec(r.recommendation_id)}
+                          >
+                            Dismiss
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p style={{ color: 'var(--text-muted)', padding: '16px 0' }}>
+                  No interventions required. All inventory indicators are healthy.
+                </p>
+              )}
+            </div>
           </div>
         )}
       </main>

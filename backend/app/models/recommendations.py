@@ -9,11 +9,13 @@ from __future__ import annotations
 import enum
 import uuid
 from datetime import datetime
+from decimal import Decimal
 from typing import Optional
 from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKeyConstraint,
+    Numeric,
     String,
     Text,
     func,
@@ -59,9 +61,17 @@ class ActionRecommendationRecord(Base):
     assigned_to: Mapped[str | None] = mapped_column(String(100), nullable=True)
     resolution_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Outcome tracking: predicted vs estimated vs verified realized benefit
+    predicted_opportunity_value: Mapped[Decimal | None] = mapped_column(Numeric(12, 3), nullable=True)
+    estimated_benefit_value: Mapped[Decimal | None] = mapped_column(Numeric(12, 3), nullable=True)
+    realized_benefit_value: Mapped[Decimal | None] = mapped_column(Numeric(12, 3), nullable=True)
+    actual_outcome_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    verified_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     __table_args__ = (
         ForeignKeyConstraint(

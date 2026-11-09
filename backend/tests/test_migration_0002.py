@@ -151,9 +151,9 @@ def verify_test_database_revision():
                 pytrace=False,
             )
 
-        if rev != "0002_ledger_rules":
+        if rev not in ("0002_ledger_rules", "0003_action_recommendations"):
             pytest.fail(
-                f"Test database revision is '{rev}', but '0002_ledger_rules' is required. "
+                f"Test database revision is '{rev}', but '0002_ledger_rules' or later is required. "
                 "Execute `alembic upgrade head` on the test database first.",
                 pytrace=False,
             )

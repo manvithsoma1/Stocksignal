@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.models.core import BucketType, Product, Store, StoreProduct
 from app.models.uploads import DataUploadBatch, UploadStatus
-from app.services import ledger, perishable, reconciliation, recommendations
+from app.services import ledger, outcome_tracking, perishable, reconciliation, recommendations
 from app.services.forecasting import inference
 
 router = APIRouter(prefix="/api/v1/decision-support", tags=["Decision Support & Integrity"])
@@ -25,6 +25,35 @@ class ReconcileRequest(BaseModel):
     store_id: uuid.UUID
     product_id: uuid.UUID
     counts: dict[BucketType, Decimal]
+
+
+class ApproveRecommendationRequest(BaseModel):
+    organization_id: uuid.UUID
+    approver_name: str = "Store Manager"
+    notes: Optional[str] = None
+
+
+class RejectRecommendationRequest(BaseModel):
+    organization_id: uuid.UUID
+    rejecter_name: str = "Store Manager"
+    reason: str = "Operationally unfeasible"
+
+
+class AssignRecommendationRequest(BaseModel):
+    organization_id: uuid.UUID
+    assignee_name: str
+
+
+class ExecuteRecommendationRequest(BaseModel):
+    organization_id: uuid.UUID
+    execution_notes: str = "Action executed on floor"
+
+
+class VerifyRecommendationRequest(BaseModel):
+    organization_id: uuid.UUID
+    verifier_name: str
+    realized_benefit: Decimal
+    outcome_notes: str
 
 
 @router.get("/stores")
@@ -225,7 +254,125 @@ def get_action_recommendations(
         stock_levels=stock_levels,
     )
 
-    return recommendations.filter_recommendations(recs, min_priority=min_priority)
+    filtered = recommendations.filter_recommendations(recs, min_priority=min_priority)
+    try:
+        outcome_tracking.persist_recommendations(db, filtered)
+    except Exception:
+        # Never break retrieval if background persistence has a transient issue
+        pass
+    return filtered
+
+
+@router.post("/recommendations/{id}/approve")
+def approve_recommendation_endpoint(
+    id: uuid.UUID,
+    payload: ApproveRecommendationRequest,
+    db: Session = Depends(get_db),
+):
+    try:
+        return outcome_tracking.approve_recommendation(
+            db=db,
+            rec_id=id,
+            org_id=payload.organization_id,
+            approver_name=payload.approver_name,
+            notes=payload.notes,
+        )
+    except outcome_tracking.RecommendationNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except outcome_tracking.InvalidLifecycleTransitionError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/recommendations/{id}/reject")
+def reject_recommendation_endpoint(
+    id: uuid.UUID,
+    payload: RejectRecommendationRequest,
+    db: Session = Depends(get_db),
+):
+    try:
+        return outcome_tracking.reject_recommendation(
+            db=db,
+            rec_id=id,
+            org_id=payload.organization_id,
+            rejecter_name=payload.rejecter_name,
+            reason=payload.reason,
+        )
+    except outcome_tracking.RecommendationNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except outcome_tracking.InvalidLifecycleTransitionError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/recommendations/{id}/assign")
+def assign_recommendation_endpoint(
+    id: uuid.UUID,
+    payload: AssignRecommendationRequest,
+    db: Session = Depends(get_db),
+):
+    try:
+        return outcome_tracking.assign_recommendation(
+            db=db,
+            rec_id=id,
+            org_id=payload.organization_id,
+            assignee_name=payload.assignee_name,
+        )
+    except outcome_tracking.RecommendationNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except outcome_tracking.InvalidLifecycleTransitionError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/recommendations/{id}/execute")
+def execute_recommendation_endpoint(
+    id: uuid.UUID,
+    payload: ExecuteRecommendationRequest,
+    db: Session = Depends(get_db),
+):
+    try:
+        return outcome_tracking.execute_recommendation(
+            db=db,
+            rec_id=id,
+            org_id=payload.organization_id,
+            execution_notes=payload.execution_notes,
+        )
+    except outcome_tracking.RecommendationNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except outcome_tracking.InvalidLifecycleTransitionError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/recommendations/{id}/verify")
+def verify_recommendation_endpoint(
+    id: uuid.UUID,
+    payload: VerifyRecommendationRequest,
+    db: Session = Depends(get_db),
+):
+    try:
+        return outcome_tracking.verify_recommendation_outcome(
+            db=db,
+            rec_id=id,
+            org_id=payload.organization_id,
+            verifier_name=payload.verifier_name,
+            realized_benefit=payload.realized_benefit,
+            outcome_notes=payload.outcome_notes,
+        )
+    except outcome_tracking.RecommendationNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except outcome_tracking.InvalidLifecycleTransitionError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/recommendations/outcomes/summary")
+def get_recommendation_outcomes_summary(
+    organization_id: uuid.UUID,
+    store_id: Optional[uuid.UUID] = None,
+    db: Session = Depends(get_db),
+):
+    return outcome_tracking.get_outcome_summary(
+        db=db,
+        org_id=organization_id,
+        store_id=store_id,
+    )
 
 
 @router.get("/forecast")
