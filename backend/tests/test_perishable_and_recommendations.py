@@ -239,3 +239,55 @@ class TestRecommendationsPureFunctions:
         assert len(filtered) == 1
         assert filtered[0].priority == Priority.CRITICAL
 
+    def test_perishable_explainable_markdown_reviews(self):
+        """Verify perishable items generate explainable markdown reviews and preserve human approval."""
+        org_id = uuid.uuid4()
+        store_id = uuid.uuid4()
+        prod_urgent = uuid.uuid4()
+        prod_critical = uuid.uuid4()
+
+        urgent_report = ProductPerishableReport(
+            org_id=org_id,
+            store_id=store_id,
+            product_id=prod_urgent,
+            sku="MILK-URGENT",
+            store_code="STR1",
+            assessed_at=datetime.now(timezone.utc),
+            worst_tier=RiskTier.URGENT,
+            total_at_risk_qty=Decimal("15.000"),
+            total_value_at_risk=Decimal("750.000"),
+            fefo_recommendation="Prioritise batch B1. 5 days remaining.",
+        )
+
+        critical_report = ProductPerishableReport(
+            org_id=org_id,
+            store_id=store_id,
+            product_id=prod_critical,
+            sku="YOGURT-CRIT",
+            store_code="STR1",
+            assessed_at=datetime.now(timezone.utc),
+            worst_tier=RiskTier.CRITICAL,
+            total_at_risk_qty=Decimal("8.000"),
+            total_value_at_risk=Decimal("400.000"),
+            fefo_recommendation="Prioritise batch B2. 1 day remaining.",
+        )
+
+        recs = generate_recommendations(perishable_reports=[urgent_report, critical_report])
+        assert len(recs) == 2
+
+        # Sorted by priority: CRITICAL first, then HIGH (URGENT maps to MEDIUM or HIGH)
+        crit_rec = next(r for r in recs if r.sku == "YOGURT-CRIT")
+        assert crit_rec.action_type == ActionType.MARKDOWN_REVIEW
+        assert crit_rec.requires_approval is True
+        assert crit_rec.approval_role == "STORE_MANAGER"
+        assert crit_rec.detail["recommended_markdown_pct"] == 40
+        assert "sign-off" in crit_rec.reason.lower() or "approval" in crit_rec.reason.lower()
+
+        urg_rec = next(r for r in recs if r.sku == "MILK-URGENT")
+        assert urg_rec.action_type == ActionType.MARKDOWN_REVIEW
+        assert urg_rec.requires_approval is True
+        assert urg_rec.detail["recommended_markdown_pct"] == 25
+        assert urg_rec.predicted_opportunity_value == Decimal("750.000")
+        assert urg_rec.estimated_benefit_value > Decimal("0.000")
+
+

@@ -87,6 +87,12 @@ class ActionRecommendation:
     reason: str = ""
     detail: dict = field(default_factory=dict)
     generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    requires_approval: bool = True
+    approval_role: str = "STORE_MANAGER"
+    status: str = "PENDING_REVIEW"
+    suggested_action_summary: str = ""
+    predicted_opportunity_value: Decimal = Decimal("0.000")
+    estimated_benefit_value: Decimal = Decimal("0.000")
     # Optional links to source signals
     reconciliation_severity: Optional[AnomalySeverity] = None
     perishable_tier: Optional[RiskTier] = None
@@ -134,14 +140,18 @@ def _from_reconciliation(report: ProductReconciliationReport) -> Optional[Action
         reason=(
             f"{sev.value} inventory discrepancy detected ({cls.value}). "
             f"Gap: {report.total_gap} units. "
-            f"Suggested: {action.value}."
+            f"Suggested: {action.value}. Human audit sign-off required."
         ),
+        requires_approval=True,
+        approval_role="INVENTORY_AUDITOR",
+        suggested_action_summary=f"Initiate {action.value} audit verification for {report.total_gap} units gap.",
         detail={
             "gap": str(report.total_gap),
             "total_ledger": str(report.total_ledger_physical),
             "total_physical": str(report.total_physical_count),
             "classification": cls.value,
             "severity": sev.value,
+            "human_approval_required": True,
         },
         reconciliation_severity=sev,
     )
@@ -149,8 +159,9 @@ def _from_reconciliation(report: ProductReconciliationReport) -> Optional[Action
 
 def _from_perishable(report: ProductPerishableReport) -> Optional[ActionRecommendation]:
     """
-    Map a perishable risk report to an ActionRecommendation.
-    Returns None if tier is SAFE.
+    Map a perishable risk report to an explainable ActionRecommendation.
+    Replaces rigid automated 30% markdowns with explainable, tiered markdown reviews
+    while preserving mandatory store manager approval.
     """
     tier = report.worst_tier
 
@@ -164,10 +175,55 @@ def _from_perishable(report: ProductPerishableReport) -> Optional[ActionRecommen
         RiskTier.EXPIRED: Priority.CRITICAL,
     }
 
-    urgent_batches = [b for b in report.batches if b.risk_tier not in (RiskTier.SAFE, RiskTier.WATCH)]
+    # Explainable markdown & clearance tiers based on shelf-life remaining
+    if tier == RiskTier.EXPIRED:
+        action_type = ActionType.INVESTIGATE
+        markdown_pct = 0
+        strategy_desc = "Expired batch detected. Item must be quarantined and written off; consumer sale is prohibited."
+        suggested_action = "Quarantine expired batch and record inventory write-off."
+    elif tier == RiskTier.CRITICAL:
+        action_type = ActionType.MARKDOWN_REVIEW
+        markdown_pct = 40
+        strategy_desc = (
+            "Critical expiry risk (0-3 days left). Recommend 40% clearance markdown "
+            "or immediate donation to recover salvage value before total spoilage."
+        )
+        suggested_action = "Review and approve 40% clearance markdown."
+    elif tier == RiskTier.URGENT:
+        action_type = ActionType.MARKDOWN_REVIEW
+        markdown_pct = 25
+        strategy_desc = (
+            "Urgent expiry risk (3-7 days left). Recommend 25% promotional markdown "
+            "to accelerate sell-through velocity to clear stock before critical expiry."
+        )
+        suggested_action = "Review and approve 25% promotional markdown."
+    elif tier == RiskTier.WATCH:
+        action_type = ActionType.MARKDOWN_REVIEW
+        markdown_pct = 10
+        strategy_desc = (
+            "Watch tier (7-14 days left). Recommend front-shelf FEFO rotation and "
+            "optional 10% promotional tag if velocity lags behind targets."
+        )
+        suggested_action = "Review 10% promotional tag & FEFO front-facing display."
+    else:
+        return None
+
+    urgent_batches = [b for b in report.batches if b.risk_tier not in (RiskTier.SAFE,)]
     urgent_summary = "; ".join(
         f"batch {b.batch_code or b.batch_id}: {b.days_remaining}d left, {b.current_qty} units"
         for b in urgent_batches[:3]
+    )
+
+    reason = (
+        f"Perishable risk [{tier.value}]. "
+        f"Est. Value at Risk: ₹{report.total_value_at_risk}. "
+        f"{strategy_desc} "
+        "Requires store manager sign-off before POS markdown application."
+    )
+
+    est_benefit = (
+        (report.total_value_at_risk * Decimal(str(100 - markdown_pct)) / Decimal("100")).quantize(Decimal("0.001"))
+        if markdown_pct > 0 else Decimal("0.000")
     )
 
     return ActionRecommendation(
@@ -176,19 +232,23 @@ def _from_perishable(report: ProductPerishableReport) -> Optional[ActionRecommen
         product_id=report.product_id,
         sku=report.sku,
         store_code=report.store_code,
-        action_type=ActionType.MARKDOWN_REVIEW,
+        action_type=action_type,
         priority=priority_map.get(tier, Priority.MEDIUM),
-        reason=(
-            f"Perishable risk tier: {tier.value}. "
-            f"Value at risk: ₹{report.total_value_at_risk}. "
-            f"{report.fefo_recommendation}"
-        ),
+        reason=reason,
+        requires_approval=True,
+        approval_role="STORE_MANAGER",
+        suggested_action_summary=suggested_action,
+        predicted_opportunity_value=report.total_value_at_risk,
+        estimated_benefit_value=est_benefit,
         detail={
             "worst_tier": tier.value,
             "total_at_risk_qty": str(report.total_at_risk_qty),
             "total_value_at_risk": str(report.total_value_at_risk),
+            "recommended_markdown_pct": markdown_pct,
+            "strategy_rationale": strategy_desc,
             "urgent_batches": urgent_summary,
             "fefo_recommendation": report.fefo_recommendation,
+            "human_approval_required": True,
         },
         perishable_tier=tier,
     )
@@ -235,6 +295,8 @@ def _from_stock_level(
             "Trigger replenishment order."
         )
 
+    order_qty = gap_to_target if (gap_to_target and gap_to_target > 0) else reorder_level
+
     return ActionRecommendation(
         org_id=org_id,
         store_id=store_id,
@@ -244,10 +306,16 @@ def _from_stock_level(
         action_type=ActionType.REPLENISH,
         priority=priority,
         reason=reason,
+        requires_approval=True,
+        approval_role="STORE_MANAGER",
+        suggested_action_summary=f"Approve purchase order for {order_qty} units.",
         detail={
             "current_sellable": str(current_sellable),
             "reorder_level": str(reorder_level),
+            "target_stock": str(target_stock) if target_stock else None,
             "gap_to_target": str(gap_to_target) if gap_to_target is not None else None,
+            "suggested_order_qty": str(order_qty),
+            "human_approval_required": True,
         },
         stock_vs_reorder="BELOW_REORDER",
     )
@@ -296,6 +364,9 @@ def _merge_for_product(
     for r in recommendations:
         merged_detail.update(r.detail)
 
+    max_opp = max(r.predicted_opportunity_value for r in recommendations)
+    max_ben = max(r.estimated_benefit_value for r in recommendations)
+
     return ActionRecommendation(
         org_id=base.org_id,
         store_id=base.store_id,
@@ -306,6 +377,12 @@ def _merge_for_product(
         priority=base.priority,
         reason=merged_reason,
         detail=merged_detail,
+        requires_approval=True,
+        approval_role=base.approval_role,
+        status=base.status,
+        suggested_action_summary=base.suggested_action_summary,
+        predicted_opportunity_value=max_opp,
+        estimated_benefit_value=max_ben,
         reconciliation_severity=next(
             (r.reconciliation_severity for r in recommendations if r.reconciliation_severity), None
         ),

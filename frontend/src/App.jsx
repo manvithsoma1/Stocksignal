@@ -836,19 +836,71 @@ export default function App() {
         {/* Recommendations View */}
         {activeTab === 'recommendations' && (
           <div className="card">
-            <div className="card-title">
-              <span>Autonomous Decision-Support Recommendations</span>
+            <div className="card-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span>Decision-Support Recommendations (Human-in-the-Loop)</span>
+              <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                Explainable suggestions • Human approval required
+              </span>
+            </div>
+            <div style={{ padding: '8px 12px', background: 'var(--bg-secondary)', borderLeft: '3px solid var(--accent)', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '14px', borderRadius: '4px' }}>
+              🛡️ <strong>Operational Safeguard:</strong> Recommendations are explainable decision aids synthesized from physical discrepancy audits, ML forecasts, and FEFO expiry risk. No price changes or inventory orders execute without authorized human sign-off.
             </div>
             {recommendations.length > 0 ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
                 {recommendations.map(r => (
                   <div key={r.recommendation_id} style={{ padding: '16px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '8px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                      <span className={`badge badge-${r.priority.toLowerCase()}`}>{r.priority}</span>
-                      <strong style={{ color: 'var(--accent)' }}>{r.action_type}</strong>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span className={`badge badge-${r.priority.toLowerCase()}`}>{r.priority}</span>
+                        <strong style={{ color: 'var(--accent)' }}>{r.action_type}</strong>
+                        {r.detail?.recommended_markdown_pct ? (
+                          <span className="badge" style={{ background: '#f59e0b', color: '#fff' }}>
+                            {r.detail.recommended_markdown_pct}% Markdown Review
+                          </span>
+                        ) : null}
+                      </div>
+                      <span style={{ fontSize: '0.75rem', padding: '3px 8px', borderRadius: '4px', background: 'rgba(59, 130, 246, 0.1)', color: '#3b82f6', border: '1px solid rgba(59, 130, 246, 0.3)' }}>
+                        👤 Requires {r.approval_role || 'STORE_MANAGER'} Sign-off
+                      </span>
                     </div>
-                    <p style={{ fontSize: '0.9rem', marginBottom: '4px' }}>{r.reason}</p>
-                    {r.sku && <small style={{ color: 'var(--text-muted)' }}>Target SKU: <code>{r.sku}</code></small>}
+
+                    {r.suggested_action_summary && (
+                      <div style={{ fontWeight: 600, fontSize: '0.92rem', marginBottom: '6px' }}>
+                        {r.suggested_action_summary}
+                      </div>
+                    )}
+
+                    <p style={{ fontSize: '0.86rem', color: 'var(--text-muted)', marginBottom: '10px', lineHeight: 1.4 }}>
+                      {r.reason}
+                    </p>
+
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '8px', borderTop: '1px solid var(--border)' }}>
+                      <div style={{ display: 'flex', gap: '16px', fontSize: '0.8rem' }}>
+                        {r.sku && <span>Target SKU: <code>{r.sku}</code></span>}
+                        {Number(r.predicted_opportunity_value) > 0 && (
+                          <span>Exposure: <strong>₹{Number(r.predicted_opportunity_value).toLocaleString()}</strong></span>
+                        )}
+                        {Number(r.estimated_benefit_value) > 0 && (
+                          <span style={{ color: 'var(--success)' }}>Est. Recovery: <strong>₹{Number(r.estimated_benefit_value).toLocaleString()}</strong></span>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button 
+                          className="btn btn-primary" 
+                          style={{ padding: '5px 12px', fontSize: '0.78rem' }}
+                          onClick={() => alert(`Recommendation ${r.recommendation_id.slice(0, 8)} approved for SKU ${r.sku}.`)}
+                        >
+                          Approve Action
+                        </button>
+                        <button 
+                          className="btn" 
+                          style={{ padding: '5px 10px', fontSize: '0.78rem', background: 'transparent', border: '1px solid var(--border)' }}
+                          onClick={() => alert(`Recommendation ${r.recommendation_id.slice(0, 8)} dismissed.`)}
+                        >
+                          Dismiss
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 ))}
               </div>

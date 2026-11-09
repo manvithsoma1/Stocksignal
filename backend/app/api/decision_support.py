@@ -100,8 +100,19 @@ def get_store_overview(
         })
 
     # 4. Generate recommendations dynamically
+    perishable_reports = []
+    for sp in sp_list:
+        p_report = perishable.assess_product(
+            db=db,
+            org_id=organization_id,
+            store_id=store_id,
+            product_id=sp.product_id,
+        )
+        if p_report.batches:
+            perishable_reports.append(p_report)
+
     recs = recommendations.generate_recommendations(
-        perishable_reports=[],
+        perishable_reports=perishable_reports,
         stock_levels=stock_levels,
     )
 
@@ -198,8 +209,19 @@ def get_action_recommendations(
             "target_stock": sp.target_stock_level,
         })
 
+    perishable_reports = []
+    for sp in sp_list:
+        p_report = perishable.assess_product(
+            db=db,
+            org_id=organization_id,
+            store_id=store_id,
+            product_id=sp.product_id,
+        )
+        if p_report.batches:
+            perishable_reports.append(p_report)
+
     recs = recommendations.generate_recommendations(
-        perishable_reports=[],
+        perishable_reports=perishable_reports,
         stock_levels=stock_levels,
     )
 

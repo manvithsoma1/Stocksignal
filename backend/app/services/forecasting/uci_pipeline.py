@@ -42,3 +42,4 @@ class UCIRetailAdapter:
             .rename(columns={"StockCode": "item_id"})
         )
         return daily
+

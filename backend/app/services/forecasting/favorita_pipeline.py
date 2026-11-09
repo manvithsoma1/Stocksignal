@@ -48,3 +48,4 @@ class FavoritaAdapter:
             "unit_sales": "sales",
         })
         return df
+

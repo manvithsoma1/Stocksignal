@@ -75,3 +75,4 @@ class ActionRecommendationRecord(Base):
             name="fk_action_recs_product",
         ),
     )
+
