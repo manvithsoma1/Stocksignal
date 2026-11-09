@@ -45,6 +45,8 @@ Desktop.ini
 
 # Large datasets & raw data downloads
 data/raw/
+backend/data/
+backend/backend/
 *.zip
 *.tar.gz
 

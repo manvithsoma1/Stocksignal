@@ -746,26 +746,38 @@ export default function App() {
         {/* Perishables View */}
         {activeTab === 'perishables' && (
           <div className="card">
-            <div className="card-title">
+            <div className="card-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span>Perishable Batch Shelf-Life Monitor (FEFO Ranking)</span>
+              <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                Exposure values are probabilistic estimates based on SKU velocity
+              </span>
+            </div>
+            <div style={{ padding: '8px 12px', background: 'var(--bg-secondary)', borderLeft: '3px solid var(--accent)', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '14px', borderRadius: '4px' }}>
+              ℹ️ <strong>Estimation Transparency:</strong> In supermarket environments without barcode batch scanning at POS checkout, batch depletion assumes FEFO (First-Expiry-First-Out) stock rotation at SKU level. Monetary exposure is estimated.
             </div>
             {urgentBatches.length > 0 ? (
               <table>
                 <thead>
                   <tr>
+                    <th>FEFO</th>
                     <th>Batch Code</th>
-                    <th>Days Remaining</th>
+                    <th>Days Left</th>
                     <th>Risk Tier</th>
-                    <th>Current Sellable Qty</th>
-                    <th>Expected Demand</th>
-                    <th>Est. Unsold Qty</th>
-                    <th>Value at Risk</th>
+                    <th>Sellable Qty</th>
+                    <th>Exp. Demand</th>
+                    <th>Est. Unsold</th>
+                    <th>Est. Exposure (Value at Risk)</th>
+                    <th>Model Confidence</th>
                   </tr>
                 </thead>
                 <tbody>
                   {urgentBatches.map(b => (
                     <tr key={b.batch_id}>
-                      <td><strong>{b.batch_code || b.batch_id.slice(0, 8)}</strong></td>
+                      <td><span className="badge" style={{ background: '#3b82f6', color: '#fff' }}>#{b.fefo_rank || 1}</span></td>
+                      <td>
+                        <strong>{b.batch_code || b.batch_id.slice(0, 8)}</strong>
+                        {b.sku && <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>SKU: {b.sku}</div>}
+                      </td>
                       <td>{b.days_remaining !== null ? `${b.days_remaining} days` : 'No Expiry'}</td>
                       <td>
                         <span className={`badge badge-${b.risk_tier.toLowerCase()}`}>
@@ -774,10 +786,22 @@ export default function App() {
                       </td>
                       <td>{b.current_qty}</td>
                       <td>{b.expected_demand_before_expiry}</td>
-                      <td style={{ color: Number(b.estimated_unsold_qty) > 0 ? 'var(--danger)' : 'var(--text-main)' }}>
+                      <td style={{ color: Number(b.estimated_unsold_qty) > 0 ? 'var(--danger)' : 'var(--text-main)', fontWeight: 600 }}>
                         {b.estimated_unsold_qty}
                       </td>
-                      <td>₹{Number(b.value_at_risk).toLocaleString()}</td>
+                      <td>
+                        <strong>₹{Number(b.value_at_risk).toLocaleString()}</strong>
+                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Estimated</div>
+                      </td>
+                      <td>
+                        <span className="badge" style={{ 
+                          background: b.confidence_level === 'HIGH_CONFIDENCE' ? 'rgba(34, 197, 94, 0.15)' : 'rgba(234, 179, 8, 0.15)',
+                          color: b.confidence_level === 'HIGH_CONFIDENCE' ? '#16a34a' : '#ca8a04',
+                          border: `1px solid ${b.confidence_level === 'HIGH_CONFIDENCE' ? '#16a34a' : '#ca8a04'}`
+                        }}>
+                          {b.confidence_level || 'ESTIMATED'}
+                        </span>
+                      </td>
                     </tr>
                   ))}
                 </tbody>

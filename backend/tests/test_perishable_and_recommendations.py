@@ -112,6 +112,76 @@ class TestPerishablePureFunctions:
         assert ranked[2].batch_code == "B3"
         assert ranked[2].fefo_rank == 3
 
+    def test_assess_batch_confidence_and_assumptions(self):
+        """Verify perishable assessment enforces estimated transparency and does not claim unsupported POS batch attribution."""
+        from unittest.mock import MagicMock
+        from app.models.core import Batch
+        from app.services.perishable import assess_batch
+
+        mock_db = MagicMock()
+        # Mock batch sellable quantity
+        mock_db.execute.return_value.scalar.return_value = Decimal("25.000")
+
+        batch = Batch(
+            id=uuid.uuid4(),
+            batch_code="BATCH-FEFO-01",
+            organization_id=uuid.uuid4(),
+            store_id=uuid.uuid4(),
+            product_id=uuid.uuid4(),
+            expiry_date=date(2026, 11, 14),
+        )
+
+        today = date(2026, 11, 9)
+        # 5 days remaining, demand = 2.000/day -> expected 10.000 units, unsold = 15.000 units
+        assessment = assess_batch(
+            db=mock_db,
+            batch=batch,
+            avg_daily_demand=Decimal("2.000"),
+            unit_cost=Decimal("50.000"),
+            today=today,
+        )
+
+        assert assessment.days_remaining == 5
+        assert assessment.risk_tier == RiskTier.URGENT
+        assert assessment.expected_demand_before_expiry == Decimal("10.000")
+        assert assessment.estimated_unsold_qty == Decimal("15.000")
+        assert assessment.value_at_risk == Decimal("750.000")
+        assert assessment.confidence_level == "HIGH_CONFIDENCE"
+        assert "SKU level" in assessment.assumptions
+        assert "FEFO shelf depletion" in assessment.assumptions
+        assert "barcode batch scanning at POS" in assessment.assumptions
+
+    def test_assess_batch_low_data_confidence(self):
+        """When demand is zero or unknown, assessment should flag LOW_DATA_CONFIDENCE."""
+        from unittest.mock import MagicMock
+        from app.models.core import Batch
+        from app.services.perishable import assess_batch
+
+        mock_db = MagicMock()
+        mock_db.execute.return_value.scalar.return_value = Decimal("10.000")
+
+        batch = Batch(
+            id=uuid.uuid4(),
+            batch_code="BATCH-NODATA",
+            organization_id=uuid.uuid4(),
+            store_id=uuid.uuid4(),
+            product_id=uuid.uuid4(),
+            expiry_date=date(2026, 11, 12),
+        )
+
+        today = date(2026, 11, 9)
+        assessment = assess_batch(
+            db=mock_db,
+            batch=batch,
+            avg_daily_demand=Decimal("0.000"),
+            unit_cost=Decimal("10.000"),
+            today=today,
+        )
+
+        assert assessment.confidence_level == "LOW_DATA_CONFIDENCE"
+        assert assessment.estimated_unsold_qty == Decimal("10.000")
+
+
 
 class TestRecommendationsPureFunctions:
     def test_generate_from_reconciliation_only(self):
@@ -168,3 +238,4 @@ class TestRecommendationsPureFunctions:
         filtered = filter_recommendations([rec1, rec2, rec3], min_priority=Priority.HIGH)
         assert len(filtered) == 1
         assert filtered[0].priority == Priority.CRITICAL
+

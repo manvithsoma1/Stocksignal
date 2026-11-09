@@ -83,6 +83,8 @@ class BatchRiskAssessment:
     value_at_risk: Decimal                  # estimated_unsold_qty * unit_cost
     risk_tier: RiskTier
     fefo_rank: int = 0                      # 1 = expires soonest; populated by rank_batches()
+    confidence_level: str = "ESTIMATED_PROBABILISTIC" # Explicit transparency label
+    assumptions: str = ""                   # Transparent explanation of forecast basis
     notes: str = ""
 
 
@@ -99,6 +101,7 @@ class ProductPerishableReport:
     total_at_risk_qty: Decimal = Decimal("0.000")
     total_value_at_risk: Decimal = Decimal("0.000")
     worst_tier: RiskTier = RiskTier.SAFE
+    exposure_confidence: str = "ESTIMATED"  # Clearly labeled as estimated
     fefo_recommendation: str = ""
 
 
@@ -240,6 +243,13 @@ def assess_batch(
     unsold = max(current_qty - expected_demand, Decimal("0.000")).quantize(Decimal("0.001"))
     value_at_risk = (unsold * unit_cost).quantize(Decimal("0.001"))
 
+    # Explicit transparency on confidence & assumptions (preventing unsupported batch depletion claims)
+    confidence = "HIGH_CONFIDENCE" if avg_daily_demand > 0 and days is not None else "LOW_DATA_CONFIDENCE"
+    assumptions_text = (
+        f"Assumes linear FEFO shelf depletion based on 30-day SKU daily velocity ({avg_daily_demand} units/day). "
+        "Sales attribution is estimated at SKU level; exact batch depletion requires barcode batch scanning at POS."
+    )
+
     return BatchRiskAssessment(
         batch_id=batch.id,
         batch_code=batch.batch_code,
@@ -256,6 +266,8 @@ def assess_batch(
         unit_cost=unit_cost,
         value_at_risk=value_at_risk,
         risk_tier=tier,
+        confidence_level=confidence,
+        assumptions=assumptions_text,
     )
 
 
