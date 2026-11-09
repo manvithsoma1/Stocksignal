@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.models.core import BucketType, Product, Store, StoreProduct
 from app.services import ledger, perishable, reconciliation, recommendations
+from app.services.forecasting import inference
 
 router = APIRouter(prefix="/api/v1/decision-support", tags=["Decision Support & Integrity"])
 
@@ -190,3 +191,54 @@ def get_action_recommendations(
     )
 
     return recommendations.filter_recommendations(recs, min_priority=min_priority)
+
+
+@router.get("/forecast")
+def get_sku_demand_forecast(
+    organization_id: uuid.UUID,
+    store_id: uuid.UUID,
+    product_id: uuid.UUID,
+    horizon_days: int = Query(14, ge=1, le=60),
+    db: Session = Depends(get_db),
+):
+    """
+    ML demand forecast and stockout risk projection using trained LightGBM model.
+    """
+    return inference.forecast_sku_demand(
+        db=db,
+        org_id=organization_id,
+        store_id=store_id,
+        product_id=product_id,
+        horizon_days=horizon_days,
+    )
+
+
+@router.get("/store-products")
+def get_store_products(
+    organization_id: uuid.UUID,
+    store_id: uuid.UUID,
+    db: Session = Depends(get_db),
+):
+    """List catalog store products with SKUs and names."""
+    sp_list = db.execute(
+        select(StoreProduct).where(
+            StoreProduct.organization_id == organization_id,
+            StoreProduct.store_id == store_id,
+            StoreProduct.is_active == True,
+        )
+    ).scalars().all()
+
+    items = []
+    for sp in sp_list:
+        p = db.execute(
+            select(Product).where(Product.organization_id == organization_id, Product.id == sp.product_id)
+        ).scalar_one_or_none()
+        if p:
+            items.append({
+                "product_id": p.id,
+                "sku": p.sku,
+                "name": p.name,
+                "category": p.category,
+                "is_perishable": p.is_perishable,
+            })
+    return items

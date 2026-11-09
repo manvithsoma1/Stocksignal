@@ -11,7 +11,8 @@ import {
   FileSpreadsheet,
   CheckCircle2,
   XCircle,
-  AlertCircle
+  AlertCircle,
+  LineChart
 } from 'lucide-react';
 
 const API_BASE = 'http://localhost:8000/api/v1';
@@ -31,6 +32,12 @@ export default function App() {
   const [urgentBatches, setUrgentBatches] = useState([]);
   const [recentMovements, setRecentMovements] = useState([]);
 
+  // Forecasting Tab State
+  const [storeProducts, setStoreProducts] = useState([]);
+  const [selectedProduct, setSelectedProduct] = useState(null);
+  const [forecastData, setForecastData] = useState(null);
+  const [forecastLoading, setForecastLoading] = useState(false);
+
   // Upload Management State
   const [uploadCategory, setUploadCategory] = useState('SALES');
   const [uploadFile, setUploadFile] = useState(null);
@@ -48,6 +55,7 @@ export default function App() {
     if (selectedStore) {
       loadStoreData(selectedStore.organization_id, selectedStore.id);
       fetchUploadBatches(selectedStore.organization_id);
+      fetchStoreProducts(selectedStore.organization_id, selectedStore.id);
     }
   }, [selectedStore]);
 
@@ -63,10 +71,41 @@ export default function App() {
         setSelectedStore(data[0]);
       }
     } catch (err) {
-      console.warn("Could not load live stores, backend might be starting:", err);
+      console.warn("Could not load live stores:", err);
       setError("Cannot reach StockSignal Backend API. Ensure backend is running on http://localhost:8000.");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchStoreProducts = async (orgId, storeId) => {
+    try {
+      const res = await fetch(`${API_BASE}/decision-support/store-products?organization_id=${orgId}&store_id=${storeId}`);
+      if (res.ok) {
+        const prods = await res.json();
+        setStoreProducts(prods);
+        if (prods.length > 0) {
+          setSelectedProduct(prods[0]);
+          fetchForecast(orgId, storeId, prods[0].product_id);
+        }
+      }
+    } catch (err) {
+      console.warn("Could not load store products:", err);
+    }
+  };
+
+  const fetchForecast = async (orgId, storeId, productId) => {
+    try {
+      setForecastLoading(true);
+      const res = await fetch(`${API_BASE}/decision-support/forecast?organization_id=${orgId}&store_id=${storeId}&product_id=${productId}&horizon_days=14`);
+      if (res.ok) {
+        const fc = await res.json();
+        setForecastData(fc);
+      }
+    } catch (err) {
+      console.error("Forecast error:", err);
+    } finally {
+      setForecastLoading(false);
     }
   };
 
@@ -177,6 +216,14 @@ export default function App() {
           >
             <TrendingUp size={18} />
             <span>Overview & Health</span>
+          </div>
+
+          <div 
+            className={`nav-item ${activeTab === 'forecasting' ? 'active' : ''}`}
+            onClick={() => setActiveTab('forecasting')}
+          >
+            <LineChart size={18} />
+            <span>Demand Forecast (ML)</span>
           </div>
 
           <div 
@@ -310,6 +357,90 @@ export default function App() {
             </div>
           </div>
         </div>
+
+        {/* Demand Forecasting Tab (LightGBM Trained Model) */}
+        {activeTab === 'forecasting' && (
+          <div className="card">
+            <div className="card-title">
+              <span>Machine Learning Demand Forecast & Stockout Runaway</span>
+              <span className="badge badge-watch">
+                {forecastData?.model_used || 'LightGBM Active'}
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', gap: '16px', alignItems: 'center', marginBottom: '24px' }}>
+              <label style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>Select SKU:</label>
+              <select
+                style={{
+                  background: 'var(--bg-secondary)',
+                  color: 'var(--text-main)',
+                  border: '1px solid var(--border)',
+                  padding: '6px 12px',
+                  borderRadius: '6px',
+                  minWidth: '240px'
+                }}
+                value={selectedProduct?.product_id || ''}
+                onChange={(e) => {
+                  const p = storeProducts.find(item => item.product_id === e.target.value);
+                  if (p && selectedStore) {
+                    setSelectedProduct(p);
+                    fetchForecast(selectedStore.organization_id, selectedStore.id, p.product_id);
+                  }
+                }}
+              >
+                {storeProducts.map(p => (
+                  <option key={p.product_id} value={p.product_id}>
+                    {p.name} ({p.sku})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {forecastLoading ? (
+              <p style={{ color: 'var(--text-muted)', padding: '24px 0' }}>Generating ML inference projections...</p>
+            ) : forecastData ? (
+              <>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '24px' }}>
+                  <div style={{ background: 'var(--bg-secondary)', padding: '16px', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Current Sellable Stock</div>
+                    <div style={{ fontSize: '1.4rem', fontWeight: 700, marginTop: '4px' }}>{forecastData.current_sellable_stock}</div>
+                  </div>
+
+                  <div style={{ background: 'var(--bg-secondary)', padding: '16px', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>14-Day Projected Demand</div>
+                    <div style={{ fontSize: '1.4rem', fontWeight: 700, marginTop: '4px', color: 'var(--accent)' }}>{forecastData.projected_demand}</div>
+                  </div>
+
+                  <div style={{ background: 'var(--bg-secondary)', padding: '16px', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Estimated Inventory Runway</div>
+                    <div style={{ fontSize: '1.4rem', fontWeight: 700, marginTop: '4px' }}>{forecastData.days_of_supply} days</div>
+                  </div>
+
+                  <div style={{ background: 'var(--bg-secondary)', padding: '16px', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Stockout Risk Level</div>
+                    <div style={{ marginTop: '6px' }}>
+                      <span className={`badge badge-${forecastData.stockout_risk.toLowerCase()}`}>
+                        {forecastData.stockout_risk}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <h4 style={{ fontSize: '0.95rem', marginBottom: '12px' }}>Day-by-Day ML Projected Unit Sales (Next 14 Days)</h4>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '8px' }}>
+                  {forecastData.daily_forecast.map((val, idx) => (
+                    <div key={idx} style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '10px', textAlign: 'center' }}>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Day {idx + 1}</div>
+                      <div style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--accent)' }}>{val}</div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <p style={{ color: 'var(--text-muted)' }}>Select a product to view forecasting projections.</p>
+            )}
+          </div>
+        )}
 
         {/* Dashboard Overview */}
         {activeTab === 'dashboard' && (
