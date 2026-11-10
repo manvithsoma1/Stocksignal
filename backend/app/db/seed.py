@@ -337,6 +337,175 @@ def seed_data(session: Session) -> Dict[str, Dict[str, int]]:
     return summary
 
 
+def seed_demo_operations(session: Session) -> dict:
+    """
+    Seed realistic initial inventory stock receipts (GRN), perishable batches,
+    and 14 days of historical daily sales movements for the demo stores.
+    
+    Ensures that:
+      - Every product has realistic sellable stock balances.
+      - Perishable items (Dairy, Bakery) have active batches with FEFO urgency.
+      - Machine learning demand forecasting can query actual sales history.
+      - Fully idempotent via unique deterministic idempotency keys.
+    """
+    from datetime import date, datetime, timedelta, timezone
+    from app.models.core import Batch, BucketType, MovementType
+    from app.schemas.inventory import MovementCreate, PostingSpec
+    from app.services import ledger
+
+    org = session.scalar(select(Organization).where(Organization.code == DEMO_ORGANIZATION["code"]))
+    if not org:
+        return {"status": "skipped", "reason": "demo organization not found"}
+
+    stores = session.scalars(select(Store).where(Store.organization_id == org.id)).all()
+    products = session.scalars(select(Product).where(Product.organization_id == org.id)).all()
+
+    today_val = date.today()
+    created_movements = 0
+    created_batches = 0
+
+    # Category baseline initial receipt quantities (units) to comfortably support 14 days of sales
+    RECEIPT_TARGETS = {
+        "Dairy": Decimal("450.000"),
+        "Bakery": Decimal("320.000"),
+        "Beverages": Decimal("180.000"),
+        "Packaged Foods": Decimal("300.000"),
+        "Personal Care": Decimal("120.000"),
+        "Household Essentials": Decimal("100.000"),
+    }
+
+    # SKU-specific daily burn rates (units/day) reflecting realistic retail velocity
+    SKU_DAILY_SALES = {
+        # Dairy
+        "DAI-MILK-500ML": Decimal("28.000"),
+        "DAI-CURD-400G": Decimal("18.000"),
+        "DAI-PAN-200G": Decimal("10.000"),
+        "DAI-BUT-100G": Decimal("4.500"),
+        # Bakery
+        "BAK-WHT-400G": Decimal("18.000"),
+        "BAK-SAN-400G": Decimal("14.000"),
+        "BAK-PAV-250G": Decimal("11.000"),
+        "BAK-RUSK-300G": Decimal("5.000"),
+        # Beverages
+        "BEV-TEA-500G": Decimal("6.000"),
+        "BEV-COF-100G": Decimal("4.000"),
+        "BEV-JUC-1L": Decimal("7.000"),
+        "BEV-SOD-750ML": Decimal("5.500"),
+        # Packaged Foods
+        "PKG-NOD-280G": Decimal("16.000"),
+        "PKG-RIC-5KG": Decimal("8.000"),
+        "PKG-ATT-5KG": Decimal("7.500"),
+        "PKG-OIL-1L": Decimal("9.000"),
+        # Personal Care
+        "PER-SOP-125G": Decimal("5.000"),
+        "PER-SHA-180ML": Decimal("3.000"),
+        "PER-TPS-150G": Decimal("4.000"),
+        "PER-SAN-50ML": Decimal("2.000"),
+        # Household Essentials
+        "HOU-DET-1KG": Decimal("3.500"),
+        "HOU-CLN-500ML": Decimal("2.500"),
+        "HOU-DSH-500ML": Decimal("3.000"),
+        "HOU-TRH-30S": Decimal("1.500"),
+    }
+
+    for store in stores:
+        for product in products:
+            # 1. Initial GRN Receipt
+            grn_key = f"SEED_GRN_V2_{store.store_code}_{product.sku}"
+            existing_grn = session.scalar(
+                select(ledger.InventoryMovement).where(
+                    ledger.InventoryMovement.organization_id == org.id,
+                    ledger.InventoryMovement.idempotency_key == grn_key,
+                )
+            )
+
+            rec_qty = RECEIPT_TARGETS.get(product.category, Decimal("100.000"))
+
+            # If perishable, create 2 realistic batches (one near expiry for FEFO demonstration)
+            batch_id = None
+            if product.is_perishable:
+                batch_code_1 = f"BATCH-{store.store_code[:3]}-{product.sku[:6]}-A"
+                existing_b1 = session.scalar(
+                    select(Batch).where(
+                        Batch.organization_id == org.id,
+                        Batch.store_id == store.id,
+                        Batch.product_id == product.id,
+                        Batch.batch_code == batch_code_1,
+                    )
+                )
+                if not existing_b1:
+                    days_remaining = 3 if product.category == "Dairy" else 4
+                    b1 = Batch(
+                        id=uuid.uuid4(),
+                        organization_id=org.id,
+                        store_id=store.id,
+                        product_id=product.id,
+                        batch_code=batch_code_1,
+                        expiry_date=today_val + timedelta(days=days_remaining),
+                        received_date=today_val - timedelta(days=14),
+                    )
+                    session.add(b1)
+                    session.flush()
+                    created_batches += 1
+                    batch_id = b1.id
+                else:
+                    batch_id = existing_b1.id
+
+            if not existing_grn:
+                payload = MovementCreate(
+                    organization_id=org.id,
+                    store_id=store.id,
+                    product_id=product.id,
+                    batch_id=batch_id,
+                    movement_type=MovementType.GRN_RECEIPT,
+                    quantity_delta=rec_qty,
+                    occurred_at=datetime.now(timezone.utc) - timedelta(days=15),
+                    source_system="SEED_DATA",
+                    idempotency_key=grn_key,
+                    postings=[PostingSpec(bucket_type=BucketType.SELLABLE, quantity_delta=rec_qty)],
+                )
+                ledger.record_movement(session, payload)
+                created_movements += 1
+
+            # 2. Seed 14 Days of Sales Transactions
+            base_burn = SKU_DAILY_SALES.get(product.sku, Decimal("5.000"))
+            for days_ago in range(14, 0, -1):
+                past_date = today_val - timedelta(days=days_ago)
+                sale_key = f"SEED_SALE_V2_{store.store_code}_{product.sku}_{past_date}"
+
+                existing_sale = session.scalar(
+                    select(ledger.InventoryMovement).where(
+                        ledger.InventoryMovement.organization_id == org.id,
+                        ledger.InventoryMovement.idempotency_key == sale_key,
+                    )
+                )
+                if not existing_sale:
+                    wday = past_date.weekday()
+                    mult = Decimal("1.35") if wday in (5, 6) else Decimal("0.90")
+                    sale_qty = (base_burn * mult).quantize(Decimal("0.001"))
+                    
+                    sale_payload = MovementCreate(
+                        organization_id=org.id,
+                        store_id=store.id,
+                        product_id=product.id,
+                        batch_id=batch_id,
+                        movement_type=MovementType.SALE,
+                        quantity_delta=-sale_qty,
+                        occurred_at=datetime(past_date.year, past_date.month, past_date.day, 18, 30, tzinfo=timezone.utc),
+                        source_system="POS_TERMINAL",
+                        idempotency_key=sale_key,
+                        postings=[PostingSpec(bucket_type=BucketType.SELLABLE, quantity_delta=-sale_qty)],
+                    )
+                    ledger.record_movement(session, sale_payload)
+                    created_movements += 1
+
+    return {
+        "status": "success",
+        "created_movements": created_movements,
+        "created_batches": created_batches,
+    }
+
+
 def run() -> None:
     with SessionLocal() as session:
         try:
@@ -349,6 +518,12 @@ def run() -> None:
             print(f"Stores:          Created: {summary['stores']['created']:<4} | Existing: {summary['stores']['existing']}")
             print(f"Products:        Created: {summary['products']['created']:<4} | Existing: {summary['products']['existing']}")
             print(f"Store Products:  Created: {summary['store_products']['created']:<4} | Existing: {summary['store_products']['existing']}")
+            
+            # Seed realistic operations (inventory + sales)
+            op_summary = seed_demo_operations(session)
+            session.commit()
+            print(f"Movements:       Created: {op_summary.get('created_movements', 0):<4}")
+            print(f"Batches:         Created: {op_summary.get('created_batches', 0):<4}")
             print("=" * 60)
             print("Seed execution finished successfully (transaction committed).")
         except Exception as e:

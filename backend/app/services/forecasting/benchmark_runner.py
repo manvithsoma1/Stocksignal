@@ -25,7 +25,7 @@ import pandas as pd
 import xgboost as xgb
 
 # Set project paths
-ROOT_DIR = Path(__file__).resolve().parent.parent.parent.parent
+ROOT_DIR = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(ROOT_DIR / "backend"))
 
 from app.services.forecasting.evaluator import ForecastEvaluator, ForecastMetrics
@@ -49,11 +49,17 @@ def load_and_preprocess_m5(n_items: int = 150) -> tuple[pd.DataFrame, pd.DataFra
     calendar = pd.read_csv(calendar_path)
     calendar["date"] = pd.to_datetime(calendar["date"])
     
-    # Load sales (sample items for fast, high-performance training)
-    print(f"[*] Reading sales data (sampling {n_items} items for comparative benchmark)...")
+    # Load sales (stratified sample across FOODS, HOUSEHOLD, HOBBIES for realistic supermarket mix)
+    print(f"[*] Reading sales data (sampling {n_items} supermarket items across categories)...")
     sales = pd.read_csv(sales_path)
     if len(sales) > n_items:
-        sales = sales.iloc[:n_items].copy()
+        n_foods = int(n_items * 0.6)
+        n_hh = int(n_items * 0.25)
+        n_hob = n_items - n_foods - n_hh
+        s_foods = sales[sales["cat_id"] == "FOODS"].head(n_foods)
+        s_hh = sales[sales["cat_id"] == "HOUSEHOLD"].head(n_hh)
+        s_hob = sales[sales["cat_id"] == "HOBBIES"].head(n_hob)
+        sales = pd.concat([s_foods, s_hh, s_hob]).reset_index(drop=True)
 
     # Identify day columns
     day_cols = [c for c in sales.columns if c.startswith("d_")]

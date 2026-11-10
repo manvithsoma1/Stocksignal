@@ -449,22 +449,38 @@ export default function App() {
         {activeTab === 'forecasting' && (
           <div className="card">
             <div className="card-title">
-              <span>Machine Learning Demand Forecast & Stockout Runaway</span>
-              <span className="badge badge-watch">
-                {forecastData?.model_used || 'LightGBM Active'}
-              </span>
+              <div>
+                <span style={{ fontSize: '1.1rem', fontWeight: 600 }}>Machine Learning Demand Forecast & Stockout Runway</span>
+                {forecastData && (
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+                    {forecastData.product_name} • SKU: <code style={{ color: 'var(--accent)' }}>{forecastData.sku}</code> • Category: <strong>{forecastData.category}</strong>
+                  </div>
+                )}
+              </div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <span className="badge badge-watch">
+                  {forecastData?.model_used || 'LightGBM Regressor'}
+                </span>
+                {forecastData && (
+                  <span className={`badge ${forecastData.data_source === 'STORE_TRANSACTION_HISTORY' ? 'badge-safe' : 'badge-watch'}`}>
+                    {forecastData.data_source === 'STORE_TRANSACTION_HISTORY'
+                      ? `Live History (${forecastData.historical_days_recorded}d recorded)`
+                      : 'Retail Category Prior'}
+                  </span>
+                )}
+              </div>
             </div>
 
-            <div style={{ display: 'flex', gap: '16px', alignItems: 'center', marginBottom: '24px' }}>
-              <label style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>Select SKU:</label>
+            <div style={{ display: 'flex', gap: '16px', alignItems: 'center', marginBottom: '24px', flexWrap: 'wrap' }}>
+              <label style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>Select Product / SKU:</label>
               <select
                 style={{
                   background: 'var(--bg-secondary)',
                   color: 'var(--text-main)',
                   border: '1px solid var(--border)',
-                  padding: '6px 12px',
+                  padding: '8px 14px',
                   borderRadius: '6px',
-                  minWidth: '240px'
+                  minWidth: '280px'
                 }}
                 value={selectedProduct?.product_id || ''}
                 onChange={(e) => {
@@ -477,30 +493,46 @@ export default function App() {
               >
                 {storeProducts.map(p => (
                   <option key={p.product_id} value={p.product_id}>
-                    {p.name} ({p.sku})
+                    {p.name} ({p.sku}) — {p.category}
                   </option>
                 ))}
               </select>
             </div>
 
             {forecastLoading ? (
-              <p style={{ color: 'var(--text-muted)', padding: '24px 0' }}>Generating ML inference projections...</p>
+              <p style={{ color: 'var(--text-muted)', padding: '32px 0', textAlign: 'center' }}>
+                <RefreshCw size={20} className="spin" style={{ display: 'inline', marginRight: '8px' }} />
+                Generating recursive LightGBM ML inference projections...
+              </p>
             ) : forecastData ? (
               <>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '24px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '16px', marginBottom: '24px' }}>
                   <div style={{ background: 'var(--bg-secondary)', padding: '16px', borderRadius: '8px', border: '1px solid var(--border)' }}>
                     <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Current Sellable Stock</div>
-                    <div style={{ fontSize: '1.4rem', fontWeight: 700, marginTop: '4px' }}>{forecastData.current_sellable_stock}</div>
+                    <div style={{ fontSize: '1.4rem', fontWeight: 700, marginTop: '4px' }}>
+                      {forecastData.current_sellable_stock} <span style={{ fontSize: '0.8rem', fontWeight: 400, color: 'var(--text-muted)' }}>units</span>
+                    </div>
+                  </div>
+
+                  <div style={{ background: 'var(--bg-secondary)', padding: '16px', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Avg Daily Burn Rate</div>
+                    <div style={{ fontSize: '1.4rem', fontWeight: 700, marginTop: '4px', color: 'var(--text-main)' }}>
+                      {forecastData.avg_daily_sales} <span style={{ fontSize: '0.8rem', fontWeight: 400, color: 'var(--text-muted)' }}>units/day</span>
+                    </div>
                   </div>
 
                   <div style={{ background: 'var(--bg-secondary)', padding: '16px', borderRadius: '8px', border: '1px solid var(--border)' }}>
                     <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>14-Day Projected Demand</div>
-                    <div style={{ fontSize: '1.4rem', fontWeight: 700, marginTop: '4px', color: 'var(--accent)' }}>{forecastData.projected_demand}</div>
+                    <div style={{ fontSize: '1.4rem', fontWeight: 700, marginTop: '4px', color: 'var(--accent)' }}>
+                      {forecastData.projected_demand} <span style={{ fontSize: '0.8rem', fontWeight: 400, color: 'var(--text-muted)' }}>units</span>
+                    </div>
                   </div>
 
                   <div style={{ background: 'var(--bg-secondary)', padding: '16px', borderRadius: '8px', border: '1px solid var(--border)' }}>
                     <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Estimated Inventory Runway</div>
-                    <div style={{ fontSize: '1.4rem', fontWeight: 700, marginTop: '4px' }}>{forecastData.days_of_supply} days</div>
+                    <div style={{ fontSize: '1.4rem', fontWeight: 700, marginTop: '4px' }}>
+                      {forecastData.days_of_supply} <span style={{ fontSize: '0.8rem', fontWeight: 400, color: 'var(--text-muted)' }}>days</span>
+                    </div>
                   </div>
 
                   <div style={{ background: 'var(--bg-secondary)', padding: '16px', borderRadius: '8px', border: '1px solid var(--border)' }}>
@@ -513,14 +545,48 @@ export default function App() {
                   </div>
                 </div>
 
-                <h4 style={{ fontSize: '0.95rem', marginBottom: '12px' }}>Day-by-Day ML Projected Unit Sales (Next 14 Days)</h4>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '8px' }}>
-                  {forecastData.daily_forecast.map((val, idx) => (
-                    <div key={idx} style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '10px', textAlign: 'center' }}>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Day {idx + 1}</div>
-                      <div style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--accent)' }}>{val}</div>
-                    </div>
-                  ))}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                  <h4 style={{ fontSize: '0.95rem', margin: 0 }}>Day-by-Day ML Projected Sales Curve (Next 14 Days)</h4>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                    Weekend peaks highlight Saturday/Sunday retail surges
+                  </span>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '8px', marginBottom: '20px' }}>
+                  {forecastData.daily_forecast.map((val, idx) => {
+                    const isWeekend = (idx % 7) === 5 || (idx % 7) === 6;
+                    const maxVal = Math.max(...forecastData.daily_forecast, 1);
+                    const pct = Math.min(100, Math.round((val / maxVal) * 100));
+
+                    return (
+                      <div
+                        key={idx}
+                        style={{
+                          background: isWeekend ? 'rgba(59, 130, 246, 0.08)' : 'var(--bg-secondary)',
+                          border: isWeekend ? '1px solid rgba(59, 130, 246, 0.3)' : '1px solid var(--border)',
+                          borderRadius: '6px',
+                          padding: '10px 8px',
+                          textAlign: 'center',
+                          position: 'relative'
+                        }}
+                      >
+                        <div style={{ fontSize: '0.7rem', color: isWeekend ? 'var(--accent)' : 'var(--text-muted)', fontWeight: isWeekend ? 600 : 400 }}>
+                          Day {idx + 1} {isWeekend ? '⭐' : ''}
+                        </div>
+                        <div style={{ fontSize: '1.15rem', fontWeight: 700, color: 'var(--text-main)', margin: '4px 0' }}>
+                          {val}
+                        </div>
+                        {/* Visual mini bar */}
+                        <div style={{ height: '4px', background: 'var(--border)', borderRadius: '2px', overflow: 'hidden' }}>
+                          <div style={{ width: `${pct}%`, height: '100%', background: isWeekend ? 'var(--accent)' : 'var(--text-muted)' }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div style={{ padding: '12px 16px', background: 'var(--bg-secondary)', borderRadius: '6px', fontSize: '0.8rem', color: 'var(--text-muted)', borderLeft: '3px solid var(--accent)' }}>
+                  🤖 <strong>Model Details:</strong> {forecastData.model_used}. Recursive autoregression computes multi-step lag features (lag_1, lag_7, lag_28) and rolling means (7d, 14d, 28d). Uploading new sales data via Data Management updates these demand curves and runways automatically.
                 </div>
               </>
             ) : (
