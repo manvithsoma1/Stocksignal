@@ -74,7 +74,7 @@ export default function App() {
       }
     } catch (err) {
       console.warn("Could not load live stores:", err);
-      setError("Cannot reach StockSignal Backend API. Ensure backend is running on http://localhost:8000.");
+      setError(`Cannot reach StockSignal Backend API (${API_BASE}). Check that the backend service is deployed and running.`);
     } finally {
       setLoading(false);
     }
