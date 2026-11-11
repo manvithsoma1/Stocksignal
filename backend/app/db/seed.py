@@ -349,9 +349,13 @@ def seed_demo_operations(session: Session) -> dict:
       - Fully idempotent via unique deterministic idempotency keys.
     """
     from datetime import date, datetime, timedelta, timezone
-    from app.models.core import Batch, BucketType, MovementType
-    from app.schemas.inventory import MovementCreate, PostingSpec
-    from app.services import ledger
+    from app.models.core import (
+        Batch,
+        BucketType,
+        InventoryMovement,
+        InventoryMovementPosting,
+        MovementType,
+    )
 
     org = session.scalar(select(Organization).where(Organization.code == DEMO_ORGANIZATION["code"]))
     if not org:
@@ -361,8 +365,20 @@ def seed_demo_operations(session: Session) -> dict:
     products = session.scalars(select(Product).where(Product.organization_id == org.id)).all()
 
     today_val = date.today()
+    now_utc = datetime.now(timezone.utc)
     created_movements = 0
     created_batches = 0
+
+    # Preload existing batches and movement idempotency keys in 2 round-trips
+    existing_batches = {
+        (b.store_id, b.product_id, b.batch_code): b.id
+        for b in session.scalars(select(Batch).where(Batch.organization_id == org.id))
+    }
+    existing_keys = set(
+        session.scalars(
+            select(InventoryMovement.idempotency_key).where(InventoryMovement.organization_id == org.id)
+        )
+    )
 
     # Category baseline initial receipt quantities (units) to comfortably support 14 days of sales
     RECEIPT_TARGETS = {
@@ -408,32 +424,17 @@ def seed_demo_operations(session: Session) -> dict:
         "HOU-TRH-30S": Decimal("1.500"),
     }
 
+    new_batches = []
+    batch_lookup: dict[tuple[uuid.UUID, uuid.UUID], uuid.UUID] = {}
+
     for store in stores:
         for product in products:
-            # 1. Initial GRN Receipt
-            grn_key = f"SEED_GRN_V2_{store.store_code}_{product.sku}"
-            existing_grn = session.scalar(
-                select(ledger.InventoryMovement).where(
-                    ledger.InventoryMovement.organization_id == org.id,
-                    ledger.InventoryMovement.idempotency_key == grn_key,
-                )
-            )
-
-            rec_qty = RECEIPT_TARGETS.get(product.category, Decimal("100.000"))
-
-            # If perishable, create 2 realistic batches (one near expiry for FEFO demonstration)
-            batch_id = None
             if product.is_perishable:
                 batch_code_1 = f"BATCH-{store.store_code[:3]}-{product.sku[:6]}-A"
-                existing_b1 = session.scalar(
-                    select(Batch).where(
-                        Batch.organization_id == org.id,
-                        Batch.store_id == store.id,
-                        Batch.product_id == product.id,
-                        Batch.batch_code == batch_code_1,
-                    )
-                )
-                if not existing_b1:
+                key = (store.id, product.id, batch_code_1)
+                if key in existing_batches:
+                    batch_lookup[(store.id, product.id)] = existing_batches[key]
+                else:
                     days_remaining = 3 if product.category == "Dairy" else 4
                     b1 = Batch(
                         id=uuid.uuid4(),
@@ -444,27 +445,50 @@ def seed_demo_operations(session: Session) -> dict:
                         expiry_date=today_val + timedelta(days=days_remaining),
                         received_date=today_val - timedelta(days=14),
                     )
-                    session.add(b1)
-                    session.flush()
+                    new_batches.append(b1)
+                    batch_lookup[(store.id, product.id)] = b1.id
                     created_batches += 1
-                    batch_id = b1.id
-                else:
-                    batch_id = existing_b1.id
 
-            if not existing_grn:
-                payload = MovementCreate(
-                    organization_id=org.id,
-                    store_id=store.id,
-                    product_id=product.id,
-                    batch_id=batch_id,
-                    movement_type=MovementType.GRN_RECEIPT,
-                    quantity_delta=rec_qty,
-                    occurred_at=datetime.now(timezone.utc) - timedelta(days=15),
-                    source_system="SEED_DATA",
-                    idempotency_key=grn_key,
-                    postings=[PostingSpec(bucket_type=BucketType.SELLABLE, quantity_delta=rec_qty)],
+    if new_batches:
+        session.add_all(new_batches)
+        session.flush()
+
+    new_movements = []
+    new_postings = []
+
+    for store in stores:
+        for product in products:
+            batch_id = batch_lookup.get((store.id, product.id))
+
+            # 1. Initial GRN Receipt
+            grn_key = f"SEED_GRN_V2_{store.store_code}_{product.sku}"
+            if grn_key not in existing_keys:
+                rec_qty = RECEIPT_TARGETS.get(product.category, Decimal("100.000"))
+                mov_id = uuid.uuid4()
+                new_movements.append(
+                    InventoryMovement(
+                        id=mov_id,
+                        organization_id=org.id,
+                        store_id=store.id,
+                        product_id=product.id,
+                        batch_id=batch_id,
+                        movement_type=MovementType.GRN_RECEIPT,
+                        quantity_delta=rec_qty,
+                        occurred_at=now_utc - timedelta(days=15),
+                        source_system="SEED_DATA",
+                        idempotency_key=grn_key,
+                    )
                 )
-                ledger.record_movement(session, payload)
+                new_postings.append(
+                    InventoryMovementPosting(
+                        id=uuid.uuid4(),
+                        organization_id=org.id,
+                        movement_id=mov_id,
+                        bucket_type=BucketType.SELLABLE,
+                        quantity_delta=rec_qty,
+                    )
+                )
+                existing_keys.add(grn_key)
                 created_movements += 1
 
             # 2. Seed 14 Days of Sales Transactions
@@ -472,32 +496,41 @@ def seed_demo_operations(session: Session) -> dict:
             for days_ago in range(14, 0, -1):
                 past_date = today_val - timedelta(days=days_ago)
                 sale_key = f"SEED_SALE_V2_{store.store_code}_{product.sku}_{past_date}"
-
-                existing_sale = session.scalar(
-                    select(ledger.InventoryMovement).where(
-                        ledger.InventoryMovement.organization_id == org.id,
-                        ledger.InventoryMovement.idempotency_key == sale_key,
-                    )
-                )
-                if not existing_sale:
+                if sale_key not in existing_keys:
                     wday = past_date.weekday()
                     mult = Decimal("1.35") if wday in (5, 6) else Decimal("0.90")
                     sale_qty = (base_burn * mult).quantize(Decimal("0.001"))
-                    
-                    sale_payload = MovementCreate(
-                        organization_id=org.id,
-                        store_id=store.id,
-                        product_id=product.id,
-                        batch_id=batch_id,
-                        movement_type=MovementType.SALE,
-                        quantity_delta=-sale_qty,
-                        occurred_at=datetime(past_date.year, past_date.month, past_date.day, 18, 30, tzinfo=timezone.utc),
-                        source_system="POS_TERMINAL",
-                        idempotency_key=sale_key,
-                        postings=[PostingSpec(bucket_type=BucketType.SELLABLE, quantity_delta=-sale_qty)],
+                    mov_id = uuid.uuid4()
+                    new_movements.append(
+                        InventoryMovement(
+                            id=mov_id,
+                            organization_id=org.id,
+                            store_id=store.id,
+                            product_id=product.id,
+                            batch_id=batch_id,
+                            movement_type=MovementType.SALE,
+                            quantity_delta=-sale_qty,
+                            occurred_at=datetime(past_date.year, past_date.month, past_date.day, 18, 30, tzinfo=timezone.utc),
+                            source_system="POS_TERMINAL",
+                            idempotency_key=sale_key,
+                        )
                     )
-                    ledger.record_movement(session, sale_payload)
+                    new_postings.append(
+                        InventoryMovementPosting(
+                            id=uuid.uuid4(),
+                            organization_id=org.id,
+                            movement_id=mov_id,
+                            bucket_type=BucketType.SELLABLE,
+                            quantity_delta=-sale_qty,
+                        )
+                    )
+                    existing_keys.add(sale_key)
                     created_movements += 1
+
+    if new_movements:
+        session.add_all(new_movements)
+        session.flush()
+        session.add_all(new_postings)
 
     return {
         "status": "success",
