@@ -15,7 +15,8 @@ import {
   LineChart
 } from 'lucide-react';
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000/api/v1';
+const RAW_API_BASE = (import.meta.env.VITE_API_BASE || 'http://localhost:8000/api/v1').replace(/\/+$/, '');
+const API_BASE = RAW_API_BASE.endsWith('/api/v1') ? RAW_API_BASE : `${RAW_API_BASE}/api/v1`;
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
