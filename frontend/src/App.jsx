@@ -511,28 +511,28 @@ export default function App() {
                   <div style={{ background: 'var(--bg-secondary)', padding: '16px', borderRadius: '8px', border: '1px solid var(--border)' }}>
                     <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Current Sellable Stock</div>
                     <div style={{ fontSize: '1.4rem', fontWeight: 700, marginTop: '4px' }}>
-                      {forecastData.current_sellable_stock} <span style={{ fontSize: '0.8rem', fontWeight: 400, color: 'var(--text-muted)' }}>units</span>
+                      {Math.round(Number(forecastData.current_sellable_stock || 0))} <span style={{ fontSize: '0.8rem', fontWeight: 400, color: 'var(--text-muted)' }}>units</span>
                     </div>
                   </div>
 
                   <div style={{ background: 'var(--bg-secondary)', padding: '16px', borderRadius: '8px', border: '1px solid var(--border)' }}>
                     <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Avg Daily Burn Rate</div>
                     <div style={{ fontSize: '1.4rem', fontWeight: 700, marginTop: '4px', color: 'var(--text-main)' }}>
-                      {forecastData.avg_daily_sales} <span style={{ fontSize: '0.8rem', fontWeight: 400, color: 'var(--text-muted)' }}>units/day</span>
+                      {Math.round(Number(forecastData.avg_daily_sales || 0))} <span style={{ fontSize: '0.8rem', fontWeight: 400, color: 'var(--text-muted)' }}>units/day</span>
                     </div>
                   </div>
 
                   <div style={{ background: 'var(--bg-secondary)', padding: '16px', borderRadius: '8px', border: '1px solid var(--border)' }}>
                     <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>14-Day Projected Demand</div>
                     <div style={{ fontSize: '1.4rem', fontWeight: 700, marginTop: '4px', color: 'var(--accent)' }}>
-                      {forecastData.projected_demand} <span style={{ fontSize: '0.8rem', fontWeight: 400, color: 'var(--text-muted)' }}>units</span>
+                      {Math.round(Number(forecastData.projected_demand || 0))} <span style={{ fontSize: '0.8rem', fontWeight: 400, color: 'var(--text-muted)' }}>units</span>
                     </div>
                   </div>
 
                   <div style={{ background: 'var(--bg-secondary)', padding: '16px', borderRadius: '8px', border: '1px solid var(--border)' }}>
                     <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Estimated Inventory Runway</div>
                     <div style={{ fontSize: '1.4rem', fontWeight: 700, marginTop: '4px' }}>
-                      {forecastData.days_of_supply} <span style={{ fontSize: '0.8rem', fontWeight: 400, color: 'var(--text-muted)' }}>days</span>
+                      {Math.round(Number(forecastData.days_of_supply || 0))} <span style={{ fontSize: '0.8rem', fontWeight: 400, color: 'var(--text-muted)' }}>days</span>
                     </div>
                   </div>
 
@@ -555,9 +555,10 @@ export default function App() {
 
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '8px', marginBottom: '20px' }}>
                   {forecastData.daily_forecast.map((val, idx) => {
+                    const roundedVal = Math.round(Number(val || 0));
                     const isWeekend = (idx % 7) === 5 || (idx % 7) === 6;
-                    const maxVal = Math.max(...forecastData.daily_forecast, 1);
-                    const pct = Math.min(100, Math.round((val / maxVal) * 100));
+                    const maxVal = Math.max(...forecastData.daily_forecast.map(v => Math.round(Number(v || 0))), 1);
+                    const pct = Math.min(100, Math.round((roundedVal / maxVal) * 100));
 
                     return (
                       <div
@@ -575,7 +576,7 @@ export default function App() {
                           Day {idx + 1} {isWeekend ? '⭐' : ''}
                         </div>
                         <div style={{ fontSize: '1.15rem', fontWeight: 700, color: 'var(--text-main)', margin: '4px 0' }}>
-                          {val}
+                          {roundedVal}
                         </div>
                         {/* Visual mini bar */}
                         <div style={{ height: '4px', background: 'var(--border)', borderRadius: '2px', overflow: 'hidden' }}>

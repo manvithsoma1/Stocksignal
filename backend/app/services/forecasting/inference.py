@@ -204,25 +204,27 @@ def forecast_sku_demand(
             weekend_factor = 1.30 if target_wday in (5, 6, 7) else 0.95
             pred_val = roll_7 * weekend_factor
 
-        pred_rounded = round(pred_val, 1)
+        pred_rounded = int(round(pred_val))
         daily_predictions.append(pred_rounded)
         sim_history.append(pred_val)
 
-    projected_demand = round(sum(daily_predictions), 1)
+    projected_demand = int(sum(daily_predictions))
 
     # 6. Stockout Runway and Risk Assessment
     if avg_daily_sales > 0:
-        days_of_supply = round(current_stock / avg_daily_sales, 1)
+        exact_runway = current_stock / avg_daily_sales
+        days_of_supply = int(round(exact_runway))
     else:
-        days_of_supply = 999.0
+        exact_runway = 999.0
+        days_of_supply = 999
 
     if current_stock <= 0:
         stockout_risk = "CRITICAL"
-    elif days_of_supply < 3.0:
+    elif exact_runway < 3.0:
         stockout_risk = "CRITICAL"
-    elif days_of_supply < 7.0:
+    elif exact_runway < 7.0:
         stockout_risk = "HIGH"
-    elif days_of_supply < 14.0:
+    elif exact_runway < 14.0:
         stockout_risk = "MEDIUM"
     else:
         stockout_risk = "SAFE"
@@ -235,8 +237,8 @@ def forecast_sku_demand(
         "sku": product.sku if product else "SKU",
         "category": product.category if product else "General",
         "horizon_days": horizon_days,
-        "current_sellable_stock": current_stock,
-        "avg_daily_sales": round(avg_daily_sales, 1),
+        "current_sellable_stock": int(round(current_stock)),
+        "avg_daily_sales": int(round(avg_daily_sales)),
         "projected_demand": projected_demand,
         "days_of_supply": days_of_supply,
         "stockout_risk": stockout_risk,

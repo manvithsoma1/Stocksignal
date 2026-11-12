@@ -148,3 +148,66 @@ class TestM5Pipeline:
         
         assert pipeline.cfg == config
         assert pipeline.data_dir is not None
+
+
+class TestForecastInferenceRounding:
+    """Tests that SKU demand forecasts return whole rounded unit counts."""
+
+    def test_forecast_sku_demand_rounds_to_whole_units(self, monkeypatch):
+        import uuid
+        from decimal import Decimal
+        from types import SimpleNamespace
+        from app.services.forecasting import inference
+
+        fake_product = SimpleNamespace(
+            sku="PKG-ATT-5KG",
+            name="Aashirvaad Atta 5kg",
+            category="Packaged Foods",
+        )
+        fake_rows = [
+            SimpleNamespace(sale_date=f"2026-11-{day:02d}", daily_units=Decimal("7.500"))
+            for day in range(1, 10)
+        ]
+
+        class _FakeExecResult:
+            def __init__(self, scalar=None, rows=None):
+                self._scalar = scalar
+                self._rows = rows or []
+
+            def scalar_one_or_none(self):
+                return self._scalar
+
+            def all(self):
+                return self._rows
+
+        class _FakeDB:
+            def __init__(self):
+                self.calls = 0
+
+            def execute(self, *args, **kwargs):
+                self.calls += 1
+                if self.calls == 1:
+                    return _FakeExecResult(scalar=fake_product)
+                return _FakeExecResult(rows=fake_rows)
+
+        monkeypatch.setattr(
+            inference.ledger,
+            "get_stock_balance",
+            lambda db, org_id, store_id, product_id: SimpleNamespace(sellable=Decimal("104.600")),
+        )
+
+        result = inference.forecast_sku_demand(
+            db=_FakeDB(),
+            org_id=uuid.uuid4(),
+            store_id=uuid.uuid4(),
+            product_id=uuid.uuid4(),
+            horizon_days=14,
+        )
+
+        assert isinstance(result["current_sellable_stock"], int)
+        assert isinstance(result["avg_daily_sales"], int)
+        assert isinstance(result["projected_demand"], int)
+        assert isinstance(result["days_of_supply"], int)
+        assert len(result["daily_forecast"]) == 14
+        assert all(isinstance(v, int) for v in result["daily_forecast"])
+        assert result["projected_demand"] == sum(result["daily_forecast"])
