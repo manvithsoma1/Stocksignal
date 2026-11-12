@@ -65,6 +65,8 @@ def persist_recommendations(
                 existing.detail = r.detail
                 existing.predicted_opportunity_value = r.predicted_opportunity_value
                 existing.estimated_benefit_value = r.estimated_benefit_value
+            r.recommendation_id = str(existing.id)
+            r.status = existing.status.value
             persisted.append(existing)
         else:
             record_id = uuid.UUID(r.recommendation_id) if isinstance(r.recommendation_id, str) and len(r.recommendation_id) == 36 else uuid.uuid4()
@@ -82,6 +84,8 @@ def persist_recommendations(
                 estimated_benefit_value=r.estimated_benefit_value,
             )
             db.add(new_rec)
+            r.recommendation_id = str(record_id)
+            r.status = RecommendationStatus.PENDING.value
             persisted.append(new_rec)
 
     db.commit()

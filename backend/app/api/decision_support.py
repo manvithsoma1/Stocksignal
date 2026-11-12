@@ -144,6 +144,10 @@ def get_store_overview(
         perishable_reports=perishable_reports,
         stock_levels=stock_levels,
     )
+    try:
+        outcome_tracking.persist_recommendations(db, recs)
+    except Exception:
+        db.rollback()
 
     # 5. Distinguish Demo Data vs. Real Uploaded Data
     real_upload_count = db.execute(
@@ -307,13 +311,17 @@ def get_action_recommendations(
         perishable_reports=perishable_reports,
         stock_levels=stock_levels,
     )
+    try:
+        outcome_tracking.persist_recommendations(db, recs)
+    except Exception:
+        db.rollback()
 
     filtered = recommendations.filter_recommendations(recs, min_priority=min_priority)
     try:
         outcome_tracking.persist_recommendations(db, filtered)
     except Exception:
         # Never break retrieval if background persistence has a transient issue
-        pass
+        db.rollback()
 
     # Serialize dataclass objects so FastAPI can JSON-encode them
     return [
