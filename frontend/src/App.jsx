@@ -402,7 +402,7 @@ export default function App() {
         </div>
 
         {error && (
-          <div style={{ padding: '12px 16px', background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.4)', borderRadius: '8px', marginBottom: '24px', color: '#fca5a5' }}>
+          <div style={{ padding: '12px 16px', background: 'rgba(220, 38, 38, 0.08)', border: '1px solid rgba(220, 38, 38, 0.35)', borderRadius: '8px', marginBottom: '24px', color: '#b91c1c' }}>
             {error}
           </div>
         )}
@@ -546,8 +546,149 @@ export default function App() {
                   </div>
                 </div>
 
+                {/* SVG Demand & Inventory Runway Graphs */}
+                {(() => {
+                  const series = forecastData.daily_forecast.map(v => Math.round(Number(v || 0)));
+                  const n = series.length || 14;
+                  const maxDemand = Math.max(...series, 1);
+                  const avgBurn = Math.round(Number(forecastData.avg_daily_sales || 0));
+                  const W = 700, H = 220, padL = 44, padR = 20, padT = 24, padB = 34;
+                  const plotW = W - padL - padR;
+                  const plotH = H - padT - padB;
+                  const yTop = Math.ceil(maxDemand * 1.2) || 10;
+
+                  const pts = series.map((val, i) => {
+                    const x = padL + (n > 1 ? (i / (n - 1)) * plotW : plotW / 2);
+                    const y = padT + plotH - (val / yTop) * plotH;
+                    return { x, y, val, isWeekend: (i % 7) === 5 || (i % 7) === 6, day: i + 1 };
+                  });
+                  const linePath = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+                  const areaPath = pts.length
+                    ? `${linePath} L${pts[pts.length - 1].x.toFixed(1)},${(padT + plotH).toFixed(1)} L${pts[0].x.toFixed(1)},${(padT + plotH).toFixed(1)} Z`
+                    : '';
+                  const avgY = padT + plotH - Math.min(1, avgBurn / yTop) * plotH;
+
+                  // Inventory Depletion Curve (Day 0 -> Day N)
+                  const startStock = Math.round(Number(forecastData.current_sellable_stock || 0));
+                  let running = startStock;
+                  let stockoutDay = startStock <= 0 ? 0 : null;
+                  const stockPtsRaw = [{ day: 0, stock: startStock }];
+                  series.forEach((d, i) => {
+                    running = Math.max(0, running - d);
+                    if (running === 0 && stockoutDay === null) stockoutDay = i + 1;
+                    stockPtsRaw.push({ day: i + 1, stock: running });
+                  });
+                  const stockTop = Math.max(startStock, 10);
+                  const sPts = stockPtsRaw.map((pt, i) => {
+                    const x = padL + (i / n) * plotW;
+                    const y = padT + plotH - (pt.stock / stockTop) * plotH;
+                    return { x, y, ...pt };
+                  });
+                  const sLinePath = sPts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+                  const sAreaPath = `${sLinePath} L${sPts[sPts.length - 1].x.toFixed(1)},${(padT + plotH).toFixed(1)} L${sPts[0].x.toFixed(1)},${(padT + plotH).toFixed(1)} Z`;
+
+                  return (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: '20px', marginBottom: '24px' }}>
+                      {/* Graph 1: 14-Day Demand Line & Area Chart */}
+                      <div style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '10px', padding: '16px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                          <h4 style={{ fontSize: '0.95rem', margin: 0 }}>14-Day Demand Forecast Curve</h4>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--accent)', fontWeight: 600 }}>
+                            Avg: {avgBurn} units/day
+                          </span>
+                        </div>
+                        <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }}>
+                          <defs>
+                            <linearGradient id="demandAreaGrad" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="0%" stopColor="#2563eb" stopOpacity="0.24" />
+                              <stop offset="100%" stopColor="#2563eb" stopOpacity="0.02" />
+                            </linearGradient>
+                          </defs>
+                          {/* Horizontal gridlines */}
+                          {[0, 0.25, 0.5, 0.75, 1].map((t, gi) => {
+                            const gy = padT + plotH * (1 - t);
+                            const gVal = Math.round(yTop * t);
+                            return (
+                              <g key={gi}>
+                                <line x1={padL} y1={gy} x2={W - padR} y2={gy} stroke="#e2e8f0" strokeWidth="1" />
+                                <text x={padL - 8} y={gy + 4} textAnchor="end" fontSize="11" fill="#64748b">{gVal}</text>
+                              </g>
+                            );
+                          })}
+                          {/* Weekend highlight bands */}
+                          {pts.filter(p => p.isWeekend).map((p) => (
+                            <rect key={`wk-${p.day}`} x={p.x - 16} y={padT} width="32" height={plotH} fill="rgba(37, 99, 235, 0.06)" rx="4" />
+                          ))}
+                          {/* Avg burn dashed line */}
+                          <line x1={padL} y1={avgY} x2={W - padR} y2={avgY} stroke="#94a3b8" strokeWidth="1.5" strokeDasharray="5 4" />
+                          {/* Area & Line */}
+                          <path d={areaPath} fill="url(#demandAreaGrad)" />
+                          <path d={linePath} fill="none" stroke="#2563eb" strokeWidth="2.5" strokeLinejoin="round" />
+                          {/* Data Points + Labels */}
+                          {pts.map((p) => (
+                            <g key={p.day}>
+                              <circle cx={p.x} cy={p.y} r="4.5" fill={p.isWeekend ? '#1d4ed8' : '#ffffff'} stroke="#2563eb" strokeWidth="2.2" />
+                              <text x={p.x} y={p.y - 9} textAnchor="middle" fontSize="11" fontWeight="600" fill="#0f172a">
+                                {p.val}
+                              </text>
+                              <text x={p.x} y={H - 10} textAnchor="middle" fontSize="11" fontWeight={p.isWeekend ? '700' : '400'} fill={p.isWeekend ? '#2563eb' : '#64748b'}>
+                                D{p.day}
+                              </text>
+                            </g>
+                          ))}
+                        </svg>
+                      </div>
+
+                      {/* Graph 2: Projected Inventory Depletion Curve */}
+                      <div style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '10px', padding: '16px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                          <h4 style={{ fontSize: '0.95rem', margin: 0 }}>Projected Stock Depletion & Runway</h4>
+                          <span style={{ fontSize: '0.75rem', fontWeight: 600, color: stockoutDay !== null ? 'var(--danger)' : 'var(--success)' }}>
+                            {stockoutDay !== null ? `Stockout projected: Day ${stockoutDay}` : `In stock through Day ${n}`}
+                          </span>
+                        </div>
+                        <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }}>
+                          <defs>
+                            <linearGradient id="stockAreaGrad" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="0%" stopColor={stockoutDay !== null ? '#dc2626' : '#059669'} stopOpacity="0.22" />
+                              <stop offset="100%" stopColor={stockoutDay !== null ? '#dc2626' : '#059669'} stopOpacity="0.02" />
+                            </linearGradient>
+                          </defs>
+                          {[0, 0.25, 0.5, 0.75, 1].map((t, gi) => {
+                            const gy = padT + plotH * (1 - t);
+                            const gVal = Math.round(stockTop * t);
+                            return (
+                              <g key={gi}>
+                                <line x1={padL} y1={gy} x2={W - padR} y2={gy} stroke="#e2e8f0" strokeWidth="1" />
+                                <text x={padL - 8} y={gy + 4} textAnchor="end" fontSize="11" fill="#64748b">{gVal}</text>
+                              </g>
+                            );
+                          })}
+                          <path d={sAreaPath} fill="url(#stockAreaGrad)" />
+                          <path d={sLinePath} fill="none" stroke={stockoutDay !== null ? '#dc2626' : '#059669'} strokeWidth="2.5" strokeLinejoin="round" />
+                          {sPts.map((p, idx) => (
+                            <g key={p.day}>
+                              <circle cx={p.x} cy={p.y} r="3.8" fill="#ffffff" stroke={p.stock === 0 ? '#dc2626' : (stockoutDay !== null ? '#dc2626' : '#059669')} strokeWidth="2" />
+                              {(idx === 0 || idx === sPts.length - 1 || p.day === stockoutDay || idx % 3 === 0) && (
+                                <text x={p.x} y={Math.max(14, p.y - 8)} textAnchor="middle" fontSize="10.5" fontWeight="600" fill="#0f172a">
+                                  {p.stock}
+                                </text>
+                              )}
+                              {(idx % 2 === 0 || idx === sPts.length - 1) && (
+                                <text x={p.x} y={H - 10} textAnchor="middle" fontSize="11" fill="#64748b">
+                                  {p.day === 0 ? 'Now' : `D${p.day}`}
+                                </text>
+                              )}
+                            </g>
+                          ))}
+                        </svg>
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                  <h4 style={{ fontSize: '0.95rem', margin: 0 }}>Day-by-Day ML Projected Sales Curve (Next 14 Days)</h4>
+                  <h4 style={{ fontSize: '0.95rem', margin: 0 }}>Day-by-Day ML Projected Sales Breakdown (Next 14 Days)</h4>
                   <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                     Weekend peaks highlight Saturday/Sunday retail surges
                   </span>
@@ -600,6 +741,78 @@ export default function App() {
         {/* Dashboard Overview */}
         {activeTab === 'dashboard' && (
           <>
+            {/* Overview Analytics Graphs */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '20px', marginBottom: '24px' }}>
+              <div className="card" style={{ marginBottom: 0 }}>
+                <div className="card-title">
+                  <span>Perishable Value at Risk by Batch</span>
+                  <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Top urgent batches (₹)</span>
+                </div>
+                {urgentBatches.length > 0 ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    {(() => {
+                      const topBatches = urgentBatches.slice(0, 5);
+                      const maxRisk = Math.max(...topBatches.map(b => Number(b.value_at_risk || 0)), 1);
+                      return topBatches.map((b) => {
+                        const riskVal = Math.round(Number(b.value_at_risk || 0));
+                        const pct = Math.max(4, Math.round((riskVal / maxRisk) * 100));
+                        const tierColor = b.risk_tier === 'CRITICAL' || b.risk_tier === 'EXPIRED'
+                          ? 'var(--danger)'
+                          : b.risk_tier === 'URGENT'
+                            ? 'var(--warning)'
+                            : 'var(--accent)';
+                        return (
+                          <div key={b.batch_id}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', marginBottom: '4px' }}>
+                              <span>
+                                <strong>{b.sku || b.batch_code}</strong>{' '}
+                                <span style={{ color: 'var(--text-muted)' }}>({b.days_remaining}d left)</span>
+                              </span>
+                              <span style={{ fontWeight: 700, color: tierColor }}>₹{riskVal.toLocaleString('en-IN')}</span>
+                            </div>
+                            <div style={{ height: '10px', background: '#f1f5f9', borderRadius: '6px', overflow: 'hidden' }}>
+                              <div style={{ width: `${pct}%`, height: '100%', background: tierColor, borderRadius: '6px' }} />
+                            </div>
+                          </div>
+                        );
+                      });
+                    })()}
+                  </div>
+                ) : (
+                  <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem' }}>No urgent perishable risk detected.</p>
+                )}
+              </div>
+
+              <div className="card" style={{ marginBottom: 0 }}>
+                <div className="card-title">
+                  <span>Pending Interventions by Priority</span>
+                  <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>{recommendations.length} active</span>
+                </div>
+                {recommendations.length > 0 ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    {(['CRITICAL', 'HIGH', 'MEDIUM', 'LOW']).map((lvl) => {
+                      const count = recommendations.filter(r => r.priority === lvl).length;
+                      const pct = Math.round((count / Math.max(recommendations.length, 1)) * 100);
+                      const barColor = lvl === 'CRITICAL' ? 'var(--danger)' : lvl === 'HIGH' ? 'var(--warning)' : lvl === 'MEDIUM' ? 'var(--accent)' : 'var(--success)';
+                      return (
+                        <div key={lvl}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', marginBottom: '4px' }}>
+                            <span style={{ fontWeight: 600 }}>{lvl}</span>
+                            <span style={{ color: 'var(--text-muted)' }}>{count} ({pct}%)</span>
+                          </div>
+                          <div style={{ height: '10px', background: '#f1f5f9', borderRadius: '6px', overflow: 'hidden' }}>
+                            <div style={{ width: `${pct}%`, height: '100%', background: barColor, borderRadius: '6px' }} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem' }}>Zero pending recommendations.</p>
+                )}
+              </div>
+            </div>
+
             <div className="card">
               <div className="card-title">
                 <span>Active Algorithmic Recommendations</span>
@@ -1051,7 +1264,7 @@ export default function App() {
                           </button>
                           <button 
                             className="btn" 
-                            style={{ padding: '5px 10px', fontSize: '0.78rem', background: 'transparent', border: '1px solid var(--border)' }}
+                            style={{ padding: '5px 10px', fontSize: '0.78rem', background: 'transparent', color: 'var(--text-main)', border: '1px solid var(--border)' }}
                             onClick={() => handleRejectRec(r.recommendation_id)}
                           >
                             Dismiss
