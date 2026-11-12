@@ -57,7 +57,53 @@ WATCH_DAYS = 14
 DEFAULT_LOOKBACK_DAYS = 30
 
 # Default unit cost used if no cost information is available
-DEFAULT_UNIT_COST = Decimal("0.000")
+DEFAULT_UNIT_COST = Decimal("50.000")
+
+# Realistic retail unit costs (INR) by SKU & category when cost column isn't stored in Product
+SKU_ESTIMATED_UNIT_COST: dict[str, Decimal] = {
+    "DAI-MILK-500ML": Decimal("28.000"),
+    "DAI-CURD-400G": Decimal("35.000"),
+    "DAI-PAN-200G": Decimal("95.000"),
+    "DAI-BUT-100G": Decimal("56.000"),
+    "BAK-WHT-400G": Decimal("45.000"),
+    "BAK-SAN-400G": Decimal("48.000"),
+    "BAK-PAV-250G": Decimal("35.000"),
+    "BAK-RUSK-300G": Decimal("55.000"),
+    "BEV-TEA-500G": Decimal("240.000"),
+    "BEV-COF-100G": Decimal("280.000"),
+    "BEV-JUC-1L": Decimal("110.000"),
+    "BEV-SOD-750ML": Decimal("40.000"),
+    "PKG-NOD-280G": Decimal("60.000"),
+    "PKG-RIC-5KG": Decimal("380.000"),
+    "PKG-ATT-5KG": Decimal("245.000"),
+    "PKG-OIL-1L": Decimal("155.000"),
+    "PER-SOP-125G": Decimal("42.000"),
+    "PER-SHA-180ML": Decimal("175.000"),
+    "PER-TPS-150G": Decimal("95.000"),
+    "PER-SAN-50ML": Decimal("25.000"),
+    "HOU-DET-1KG": Decimal("135.000"),
+    "HOU-CLN-500ML": Decimal("105.000"),
+    "HOU-DSH-500ML": Decimal("115.000"),
+    "HOU-TRH-30S": Decimal("85.000"),
+}
+
+CATEGORY_ESTIMATED_UNIT_COST: dict[str, Decimal] = {
+    "Dairy": Decimal("50.000"),
+    "Bakery": Decimal("45.000"),
+    "Beverages": Decimal("120.000"),
+    "Packaged Foods": Decimal("85.000"),
+    "Personal Care": Decimal("110.000"),
+    "Household Essentials": Decimal("140.000"),
+}
+
+
+def get_estimated_unit_cost(sku: Optional[str] = None, category: Optional[str] = None) -> Decimal:
+    """Resolve estimated unit cost (INR) from SKU or product category."""
+    if sku and sku in SKU_ESTIMATED_UNIT_COST:
+        return SKU_ESTIMATED_UNIT_COST[sku]
+    if category and category in CATEGORY_ESTIMATED_UNIT_COST:
+        return CATEGORY_ESTIMATED_UNIT_COST[category]
+    return DEFAULT_UNIT_COST
 
 
 # --------------------------------------------------------------------------- #
@@ -296,7 +342,7 @@ def assess_product(
     org_id: uuid.UUID,
     store_id: uuid.UUID,
     product_id: uuid.UUID,
-    unit_cost: Decimal = DEFAULT_UNIT_COST,
+    unit_cost: Optional[Decimal] = None,
     lookback_days: int = DEFAULT_LOOKBACK_DAYS,
     today: Optional[date] = None,
 ) -> ProductPerishableReport:
@@ -306,7 +352,7 @@ def assess_product(
     Returns:
         ProductPerishableReport with per-batch details and aggregate metrics.
     """
-    # Fetch product SKU
+    # Fetch product SKU & category
     product = db.execute(
         select(Product).where(
             Product.organization_id == org_id,
@@ -314,6 +360,11 @@ def assess_product(
         )
     ).scalar_one_or_none()
     sku = product.sku if product else str(product_id)
+    resolved_unit_cost = (
+        unit_cost
+        if unit_cost is not None
+        else get_estimated_unit_cost(product.sku if product else None, product.category if product else None)
+    )
 
     # Fetch store code
     store = db.execute(
@@ -338,7 +389,7 @@ def assess_product(
 
     assessments = []
     for batch in batches:
-        a = assess_batch(db, batch, avg_daily, unit_cost, today)
+        a = assess_batch(db, batch, avg_daily, resolved_unit_cost, today)
         a.sku = sku
         assessments.append(a)
 
@@ -401,16 +452,32 @@ def find_urgent_batches(
 
     # Group by (store_id, product_id) for avg demand + ranking
     groups: dict[tuple, list[Batch]] = {}
+    product_ids: set[uuid.UUID] = set()
     for b in batches:
         key = (b.store_id, b.product_id)
         groups.setdefault(key, []).append(b)
+        product_ids.add(b.product_id)
+
+    product_map: dict[uuid.UUID, Product] = {}
+    if product_ids:
+        products = db.execute(
+            select(Product).where(
+                Product.organization_id == org_id,
+                Product.id.in_(product_ids),
+            )
+        ).scalars().all()
+        product_map = {p.id: p for p in products}
 
     all_assessments = []
     for (sid, pid), group_batches in groups.items():
         avg_daily = _get_avg_daily_demand(db, org_id, sid, pid)
+        prod = product_map.get(pid)
+        prod_sku = prod.sku if prod else str(pid)
+        unit_cost = get_estimated_unit_cost(prod.sku if prod else None, prod.category if prod else None)
         group_assessments = []
         for batch in group_batches:
-            a = assess_batch(db, batch, avg_daily, today=today)
+            a = assess_batch(db, batch, avg_daily, unit_cost=unit_cost, today=today)
+            a.sku = prod_sku
             group_assessments.append(a)
         rank_batches(group_assessments)
         all_assessments.extend(group_assessments)

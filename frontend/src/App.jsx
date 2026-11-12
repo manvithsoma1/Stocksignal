@@ -430,7 +430,7 @@ export default function App() {
           <div className="stat-card">
             <div className="stat-label">Estimated Value at Risk</div>
             <div className="stat-value" style={{ color: overview?.total_value_at_risk > 0 ? 'var(--danger)' : 'var(--text-main)' }}>
-              ₹{overview ? Number(overview.total_value_at_risk).toLocaleString() : '0'}
+              ₹{overview ? Math.round(Number(overview.total_value_at_risk || 0)).toLocaleString('en-IN') : '0'}
             </div>
             <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '4px' }}>
               Potential expiry loss
