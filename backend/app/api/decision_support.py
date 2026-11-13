@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.models.core import BucketType, Product, Store, StoreProduct
+from app.models.core import Batch, BucketType, Product, Store, StoreProduct
 from app.models.uploads import DataUploadBatch, UploadStatus
 from app.services import ledger, outcome_tracking, perishable, reconciliation, recommendations
 from app.services.forecasting import inference
@@ -78,6 +78,74 @@ def get_stores(
     ]
 
 
+def _build_store_recommendations(
+    db: Session,
+    organization_id: uuid.UUID,
+    store_id: uuid.UUID,
+    sp_list: Sequence[StoreProduct],
+) -> list[recommendations.ActionRecommendation]:
+    """Helper to generate and persist store recommendations efficiently in minimal queries."""
+    if not sp_list:
+        return []
+
+    # 1. Preload products & store stock balances in 2 queries instead of 2 * N
+    products = db.execute(
+        select(Product).where(Product.organization_id == organization_id)
+    ).scalars().all()
+    prod_map = {p.id: p for p in products}
+
+    balances_map = ledger.get_store_stock_balances(db, organization_id, store_id)
+
+    stock_levels = []
+    for sp in sp_list:
+        prod = prod_map.get(sp.product_id)
+        bal = balances_map.get(sp.product_id)
+        sellable_qty = bal.sellable if bal else Decimal("0.000")
+        stock_levels.append({
+            "org_id": organization_id,
+            "store_id": store_id,
+            "product_id": sp.product_id,
+            "sku": prod.sku if prod else str(sp.product_id),
+            "store_code": "",
+            "current_sellable": sellable_qty,
+            "reorder_level": sp.reorder_level,
+            "target_stock": sp.target_stock_level,
+        })
+
+    # 2. Only assess perishable products that actually have batches in this store
+    batch_pids = set(
+        db.execute(
+            select(Batch.product_id).where(
+                Batch.organization_id == organization_id,
+                Batch.store_id == store_id,
+            ).distinct()
+        ).scalars().all()
+    )
+
+    perishable_reports = []
+    for pid in batch_pids:
+        p_report = perishable.assess_product(
+            db=db,
+            org_id=organization_id,
+            store_id=store_id,
+            product_id=pid,
+        )
+        if p_report.batches:
+            perishable_reports.append(p_report)
+
+    recs = recommendations.generate_recommendations(
+        perishable_reports=perishable_reports,
+        stock_levels=stock_levels,
+    )
+
+    try:
+        outcome_tracking.persist_recommendations(db, recs)
+    except Exception:
+        db.rollback()
+
+    return recs
+
+
 @router.get("/overview")
 def get_store_overview(
     organization_id: uuid.UUID,
@@ -110,46 +178,10 @@ def get_store_overview(
     )
     total_val_at_risk = sum(b.value_at_risk for b in urgent_batches)
 
-    # 3. Stock levels across store products
-    stock_levels = []
-    for sp in sp_count:
-        bal = ledger.get_stock_balance(db, organization_id, store_id, sp.product_id)
-        prod = db.execute(
-            select(Product).where(Product.organization_id == organization_id, Product.id == sp.product_id)
-        ).scalar_one_or_none()
-        stock_levels.append({
-            "org_id": organization_id,
-            "store_id": store_id,
-            "product_id": sp.product_id,
-            "sku": prod.sku if prod else str(sp.product_id),
-            "store_code": "",
-            "current_sellable": bal.sellable,
-            "reorder_level": sp.reorder_level,
-            "target_stock": sp.target_stock_level,
-        })
+    # 3. Generate and persist recommendations in batch
+    recs = _build_store_recommendations(db, organization_id, store_id, sp_count)
 
-    # 4. Generate recommendations dynamically
-    perishable_reports = []
-    for sp in sp_count:  # sp_count is the full list of active StoreProduct rows
-        p_report = perishable.assess_product(
-            db=db,
-            org_id=organization_id,
-            store_id=store_id,
-            product_id=sp.product_id,
-        )
-        if p_report.batches:
-            perishable_reports.append(p_report)
-
-    recs = recommendations.generate_recommendations(
-        perishable_reports=perishable_reports,
-        stock_levels=stock_levels,
-    )
-    try:
-        outcome_tracking.persist_recommendations(db, recs)
-    except Exception:
-        db.rollback()
-
-    # 5. Distinguish Demo Data vs. Real Uploaded Data
+    # 4. Distinguish Demo Data vs. Real Uploaded Data
     real_upload_count = db.execute(
         select(DataUploadBatch).where(
             DataUploadBatch.organization_id == organization_id,
@@ -279,42 +311,7 @@ def get_action_recommendations(
         )
     ).scalars().all()
 
-    stock_levels = []
-    for sp in sp_list:
-        bal = ledger.get_stock_balance(db, organization_id, store_id, sp.product_id)
-        prod = db.execute(
-            select(Product).where(Product.organization_id == organization_id, Product.id == sp.product_id)
-        ).scalar_one_or_none()
-        stock_levels.append({
-            "org_id": organization_id,
-            "store_id": store_id,
-            "product_id": sp.product_id,
-            "sku": prod.sku if prod else str(sp.product_id),
-            "store_code": "",
-            "current_sellable": bal.sellable,
-            "reorder_level": sp.reorder_level,
-            "target_stock": sp.target_stock_level,
-        })
-
-    perishable_reports = []
-    for sp in sp_list:
-        p_report = perishable.assess_product(
-            db=db,
-            org_id=organization_id,
-            store_id=store_id,
-            product_id=sp.product_id,
-        )
-        if p_report.batches:
-            perishable_reports.append(p_report)
-
-    recs = recommendations.generate_recommendations(
-        perishable_reports=perishable_reports,
-        stock_levels=stock_levels,
-    )
-    try:
-        outcome_tracking.persist_recommendations(db, recs)
-    except Exception:
-        db.rollback()
+    recs = _build_store_recommendations(db, organization_id, store_id, sp_list)
 
     filtered = recommendations.filter_recommendations(recs, min_priority=min_priority)
     try:

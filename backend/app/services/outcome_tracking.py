@@ -40,22 +40,29 @@ def persist_recommendations(
     If a PENDING record already exists for the same (org, store, product, action_type),
     its predictions and details are refreshed.
     """
+    if not recs:
+        return []
+
+    org_ids = list({r.org_id for r in recs})
+    existing_records = db.execute(
+        select(ActionRecommendationRecord).where(
+            ActionRecommendationRecord.organization_id.in_(org_ids),
+            ActionRecommendationRecord.status.in_([
+                RecommendationStatus.PENDING,
+                RecommendationStatus.APPROVED,
+                RecommendationStatus.IN_PROGRESS,
+            ]),
+        )
+    ).scalars().all()
+
+    existing_map = {
+        (rec.organization_id, rec.store_id, rec.product_id, rec.action_type): rec
+        for rec in existing_records
+    }
+
     persisted = []
     for r in recs:
-        # Check existing pending recommendation for this product & action
-        existing = db.execute(
-            select(ActionRecommendationRecord).where(
-                ActionRecommendationRecord.organization_id == r.org_id,
-                ActionRecommendationRecord.store_id == r.store_id,
-                ActionRecommendationRecord.product_id == r.product_id,
-                ActionRecommendationRecord.action_type == r.action_type.value,
-                ActionRecommendationRecord.status.in_([
-                    RecommendationStatus.PENDING,
-                    RecommendationStatus.APPROVED,
-                    RecommendationStatus.IN_PROGRESS,
-                ]),
-            )
-        ).scalar_one_or_none()
+        existing = existing_map.get((r.org_id, r.store_id, r.product_id, r.action_type.value))
 
         if existing:
             # Update estimated values and reason if pending

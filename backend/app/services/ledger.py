@@ -113,6 +113,48 @@ def get_stock_balance(
     )
 
 
+def get_store_stock_balances(
+    db: Session,
+    organization_id: uuid.UUID,
+    store_id: uuid.UUID,
+) -> dict[uuid.UUID, StockBalanceResponse]:
+    """Calculate net stock balance per bucket for all products in a store in a single query."""
+    stmt = (
+        select(
+            InventoryMovement.product_id,
+            InventoryMovementPosting.bucket_type,
+            func.coalesce(func.sum(InventoryMovementPosting.quantity_delta), Decimal("0.000")),
+        )
+        .join(
+            InventoryMovement,
+            InventoryMovement.id == InventoryMovementPosting.movement_id,
+        )
+        .where(
+            InventoryMovement.organization_id == organization_id,
+            InventoryMovement.store_id == store_id,
+        )
+        .group_by(InventoryMovement.product_id, InventoryMovementPosting.bucket_type)
+    )
+    rows = db.execute(stmt).all()
+    product_map: dict[uuid.UUID, dict[BucketType, Decimal]] = {}
+    for pid, b_type, qty in rows:
+        if pid not in product_map:
+            product_map[pid] = {b: Decimal("0.000") for b in BucketType}
+        product_map[pid][b_type] = Decimal(str(qty))
+
+    results: dict[uuid.UUID, StockBalanceResponse] = {}
+    for pid, bmap in product_map.items():
+        results[pid] = StockBalanceResponse(
+            organization_id=organization_id,
+            store_id=store_id,
+            product_id=pid,
+            sellable=bmap[BucketType.SELLABLE],
+            quarantined=bmap[BucketType.QUARANTINED],
+            physical=bmap[BucketType.SELLABLE] + bmap[BucketType.QUARANTINED],
+        )
+    return results
+
+
 def get_batch_balances(
     db: Session,
     organization_id: uuid.UUID,
